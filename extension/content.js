@@ -55,11 +55,11 @@
     title.textContent = "Article Formatter";
     title.style.cssText = "font-weight:700;font-size:13.5px;margin-bottom:2px";
 
-    // The most important line on the panel: tell the user this is NOT where the article gets
-    // pasted. Pasting raw text directly into Medium here bypasses the whole wizard (image slots,
-    // captions, alt) — which was the failure mode observed in v0.2.0's screenshots.
+    // Everything the panel does, spelled out in one line — no separate Advanced section, no
+    // hidden buttons. Ordering matches how the user actually uses it: build the article in the
+    // wizard, paste into this draft, click Fill captions & alt tags.
     const sub = document.createElement("div");
-    sub.innerHTML = 'Open the <b>wizard</b> to assemble your article (title, body, images, captions). It sends the finished article straight into this draft.';
+    sub.innerHTML = '1) Build the article in the <b>wizard</b>. 2) Paste it here with Ctrl/Cmd+V. 3) Click <b>Fill captions &amp; alt tags</b>.';
     sub.style.cssText = "color:#6d6f78;font-size:11.5px;margin-bottom:9px";
 
     const btnStyle = [
@@ -69,33 +69,20 @@
     ].join(";");
     const outlineStyle = btnStyle + ";background:#fff;border-color:#cdbf93;font-weight:500";
 
+    // Primary action: fills BOTH captions and alt in one click, in the right order (alt first
+    // via the alt dialog, then captions via the figcaption DOM). Combined per user request —
+    // separate buttons were friction with no upside since these always run together.
+    const btnFill = document.createElement("button");
+    btnFill.textContent = "Fill captions & alt tags";
+    btnFill.style.cssText = btnStyle;
+
     const btnOpen = document.createElement("button");
     btnOpen.textContent = "Open the wizard";
-    btnOpen.style.cssText = btnStyle;
+    btnOpen.style.cssText = outlineStyle;
 
-    // Advanced/fallback: only useful once the wizard has already run, put its output on the
-    // clipboard, and the user has already pasted the body into the editor manually. Kept
-    // available but visually secondary and behind a small "Advanced" toggle so it doesn't
-    // mislead a first-time user into pressing it with nothing on the clipboard.
-    const adv = document.createElement("details");
-    adv.style.cssText = "margin-top:6px";
-    const advSum = document.createElement("summary");
-    advSum.textContent = "Advanced: manual paste helpers";
-    advSum.style.cssText = "cursor:pointer;font-size:11.5px;color:#6d6f78;padding:3px 0;list-style:disclosure-closed";
-    adv.appendChild(advSum);
-    const advHelp = document.createElement("div");
-    advHelp.style.cssText = "color:#6d6f78;font-size:11px;margin:4px 0 2px";
-    advHelp.innerHTML = 'Use these only after the wizard has run. In the wizard: click <b>Copy for Medium</b>, then here press Ctrl/Cmd+V into the editor, then click <b>Fill alt tags</b>.';
-    const btnAlt = document.createElement("button");
-    btnAlt.textContent = "Fill alt tags (needs wizard clipboard)";
-    btnAlt.style.cssText = outlineStyle;
-    const btnCap = document.createElement("button");
-    btnCap.textContent = "Fill captions (needs wizard clipboard)";
-    btnCap.style.cssText = outlineStyle;
     const btnAuto = document.createElement("button");
-    btnAuto.textContent = "Auto-insert body + alt (beta)";
+    btnAuto.textContent = "Auto-insert body + captions + alt (beta)";
     btnAuto.style.cssText = outlineStyle;
-    adv.append(advHelp, btnAlt, btnCap, btnAuto);
 
     logEl = document.createElement("div");
     logEl.style.cssText = [
@@ -110,18 +97,17 @@
     hide.style.cssText = "position:absolute;top:8px;right:10px;border:none;background:none;font-size:16px;line-height:1;color:#9a9585;cursor:pointer";
     hide.onclick = () => wrap.remove();
 
-    wrap.append(title, sub, btnOpen, adv, logEl, hide);
+    wrap.append(title, sub, btnFill, btnOpen, btnAuto, logEl, hide);
     document.body.appendChild(wrap);
-    log("Click 'Open the wizard' to build the article. This panel only handles Medium-side steps.");
+    log("Ready. Paste the wizard's article here with Ctrl/Cmd+V, then click Fill captions & alt tags.");
 
+    btnFill.onclick = () => run(fillAltAndCaptionsFlow, btnFill);
     btnOpen.onclick = () => run(async () => {
       log("Opening the wizard in a new tab…");
       const reply = await chrome.runtime.sendMessage({ type: "af-open-wizard" });
       if (!reply || !reply.ok) log("Couldn't open the wizard: " + ((reply && reply.error) || "no response"), "err");
       else log("Wizard opened — switch to that tab to assemble your article.", "ok");
     }, btnOpen);
-    btnAlt.onclick = () => run(fillAltFlow, btnAlt);
-    btnCap.onclick = () => run(fillCaptionsFlow, btnCap);
     btnAuto.onclick = () => run(autoFlow, btnAuto);
     return wrap;
   }
@@ -267,6 +253,21 @@
     const src = await getSource();
     if (!src) return;
     log(`Clipboard article has ${src.captions.filter(Boolean).length} caption${src.captions.filter(Boolean).length === 1 ? "" : "s"}.`);
+    await fillCaptions(src.captions);
+  }
+
+  // Combined path used by the panel's primary button: one clipboard read, alt first (via the
+  // alt-dialog), then captions (via the figcaption DOM). Kept separate from the beta auto-insert
+  // above so the reliable, verified path stays the default.
+  async function fillAltAndCaptionsFlow() {
+    const src = await getSource();
+    if (!src) return;
+    const nAlt = src.alts.filter(Boolean).length;
+    const nCap = src.captions.filter(Boolean).length;
+    log(`Clipboard article: ${nAlt} alt tag${nAlt === 1 ? "" : "s"}, ${nCap} caption${nCap === 1 ? "" : "s"}.`);
+    log("Filling alt tags first…");
+    await fillAlts(src.alts);
+    log("Now filling captions…");
     await fillCaptions(src.captions);
   }
 
