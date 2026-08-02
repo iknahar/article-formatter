@@ -43,14 +43,13 @@ placement/caption/alt-tag step — it does not write the article itself.
 7. **Preview & edit** — the compiled article is `contenteditable`; click
    into any paragraph and fix it. Every image (AI, external, and diagram
    alike) renders with its caption and a small alt-tag note beneath it.
-8. **Publish** — no token, no owner/repo/branch fields (removed 2026-08-02,
-   see §3). Computes the exact future URL client-side, shows it immediately,
-   and downloads the HTML file under the matching filename. The user hands
-   that file to Claude in their chat, who pushes it to this repo's
-   `articles/` folder using the Claude Code session's own `gh` auth — no
-   credential ever touches the browser. The shown link goes live once that
-   push lands and GitHub Pages rebuilds (~1 min). Paste it into your
-   platform's story-import tool.
+8. **Publish** — one click, fully automatic (see §3 for the full history —
+   this went through two other designs earlier the same day before landing
+   here). Uploads to Vercel Blob storage via `/api/publish` and gets a live
+   public link back immediately, no token or manual hand-off. Only the 5
+   most recently published articles stay live; publishing a new one deletes
+   the oldest automatically. Paste the returned link into your platform's
+   story-import tool.
 
 ## 2. Marker syntax the parser understands
 
@@ -89,44 +88,51 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 
 ## 3. Publishing
 
-**GitHub Pages only** — no Vercel, no token in the browser. The app's
-`Publish` button no longer talks to the GitHub API itself. It:
+**Vercel Blob, fully automatic, rolling 5-article window.** (Current design,
+2026-08-02 — the third iteration of this feature; see the history below.)
+`POST /api/publish` (a Vercel serverless function, `api/publish.js`):
 
-1. Computes `articles/<slug>-<id>.html` (same slug/id scheme as before).
-2. Shows the resulting link immediately, clearly labeled "not live yet."
-   The owner/repo in that URL are **derived from `location.hostname` /
-   `location.pathname`** at runtime (`repoInfo()` in `app.js`), not
-   hardcoded — a fork or rename produces a correct link with zero code
-   changes. Falls back to `iknahar`/`article-formatter` only when there's
-   no usable location (e.g. opened via `file://`, which isn't the real
-   usage path anyway).
-3. Downloads the compiled HTML under that exact filename.
+1. Uploads the compiled HTML to Vercel Blob storage (`put()`, public access,
+   random suffix so slugs never collide).
+2. Lists all blobs under `articles/` (`list()`), sorts newest-first.
+3. Deletes (`del()`) everything beyond the `MAX_ARTICLES`-most-recent
+   (default 5, overridable via a `MAX_ARTICLES` env var on the Vercel
+   project — no code change needed to tune it).
+4. Returns the new blob's public URL, plus how many are being kept/were
+   just deleted, straight back to the browser in the same request — one
+   click, no polling, no manual hand-off.
 
-The user then hands that file to Claude in their chat. Claude (already
-`gh`-authenticated as `iknahar` in the Claude Code session — see §4) commits
-it to `articles/` directly via `gh`/git, no PAT creation or browser-side
-token ever required. This replaced an earlier design where the app itself
-called `PUT /repos/{owner}/{repo}/contents/{path}` with a fine-grained PAT
-the user had to create and paste into `localStorage` — removed 2026-08-02
-because the token-creation step was real friction the user wanted gone, and
-a static client-only app can't write to GitHub without *some* credential
-somewhere, so the credential moved to the Claude Code session instead of the
-browser. GitHub Pages is enabled on this repo (`Settings → Pages → Deploy
-from branch → main / root`), confirmed live at
-`https://iknahar.github.io/article-formatter/`.
+**This requires the app itself to be deployed on Vercel**, not just GitHub
+Pages — GitHub Pages is static-only and cannot run `/api/publish` at all.
+Deployment steps are in the README (`Deploy on Vercel` section): import the
+repo into Vercel, enable a Blob store (auto-injects
+`BLOB_READ_WRITE_TOKEN`), redeploy. **This one step needs the user's own
+Vercel account** — it can't be done from this session (no `vercel` CLI
+installed, and connecting a Vercel account requires an interactive
+OAuth/browser login the assistant can't perform headlessly). Everything
+else (code, retention logic, UI) is done and pushed.
 
-**Tradeoff to be upfront about:** this makes Publish a two-step,
-human-in-the-loop process (download → hand to Claude) rather than one click.
-It is not fully automated. If the user wants one-click publishing back, the
-options are: (a) restore the browser-side PAT flow this replaced, or
-(b) stand up a minimal backend that holds a server-side credential — both
-previously discussed and both explicitly declined so far (token friction,
-and "not vercel needed" respectively).
+GitHub Pages hosting stays enabled too and still works for browsing the
+wizard steps 1–8, but Publish will fail there with a clear error message
+pointing at the Vercel requirement (no serverless runtime on Pages).
 
-*(A Vercel Blob storage publish path existed earlier in the project and was
-deliberately removed at the user's request — GitHub Pages replaced it
-entirely, not alongside it. Do not re-add Vercel unless the user explicitly
-asks again.)*
+### History of this feature (why it's been rebuilt twice)
+
+1. **Original build** (before this session touched it): Vercel Blob publish,
+   alongside a GitHub Pages option — user picked GitHub Pages as sole
+   destination, Vercel path removed entirely (§6 old note, now superseded).
+2. **Second design** (same day): removed GitHub-API-token requirement from
+   the browser; replaced with "show predicted link, download file, hand off
+   to Claude to push via the Claude Code session's own `gh` auth." Worked,
+   but was explicitly a two-step, human-in-the-loop process — the user
+   confirmed this friction ("i do not want to push after preparing an
+   article") right after trying it once.
+3. **Current design**: the user asked directly for automatic Vercel
+   deployment with a capped rolling link count ("max 5 links... delete the
+   old ones") — restoring and enhancing the original Vercel Blob path with
+   the retention logic. This is a deliberate, explicit reversal of the
+   GitHub-Pages-only decision from earlier the same day, not a
+   misunderstanding — don't second-guess it in a future session.
 
 ## 4. Repo / identity
 
