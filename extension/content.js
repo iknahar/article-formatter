@@ -55,11 +55,13 @@
     title.textContent = "Article Formatter";
     title.style.cssText = "font-weight:700;font-size:13.5px;margin-bottom:2px";
 
-    // Everything the panel does, in one line. Two buttons — the primary one is what runs after
-    // you've pasted the article; the auto-insert beta path stays available for users who want to
-    // try the one-click end-to-end.
+    // Everything the panel does, in two clear paths. The primary path opens the assembly overlay
+    // right here on this Medium tab — the whole wizard (body/diagrams/images/preview) runs in an
+    // iframe over the draft, and its "Insert into draft" writes directly into the editor beneath.
+    // The secondary path is for when the article body has already been pasted manually and only
+    // captions + alt still need filling.
     const sub = document.createElement("div");
-    sub.innerHTML = 'Paste the wizard’s article with Ctrl/Cmd+V, then click <b>Fill captions &amp; alt tags</b>.';
+    sub.innerHTML = 'Click <b>Assemble article</b> to build one here. If you already pasted the article, use <b>Fill captions &amp; alt tags</b>.';
     sub.style.cssText = "color:#6d6f78;font-size:11.5px;margin-bottom:9px";
 
     const btnStyle = [
@@ -69,16 +71,13 @@
     ].join(";");
     const outlineStyle = btnStyle + ";background:#fff;border-color:#cdbf93;font-weight:500";
 
-    // Primary action: fills BOTH captions and alt in one click, in the right order (alt first
-    // via the alt dialog, then captions via the figcaption DOM). Combined per user request —
-    // separate buttons were friction with no upside since these always run together.
+    const btnAssemble = document.createElement("button");
+    btnAssemble.textContent = "Assemble article";
+    btnAssemble.style.cssText = btnStyle;
+
     const btnFill = document.createElement("button");
     btnFill.textContent = "Fill captions & alt tags";
-    btnFill.style.cssText = btnStyle;
-
-    const btnAuto = document.createElement("button");
-    btnAuto.textContent = "Auto-insert body + captions + alt (beta)";
-    btnAuto.style.cssText = outlineStyle;
+    btnFill.style.cssText = outlineStyle;
 
     logEl = document.createElement("div");
     logEl.style.cssText = [
@@ -93,12 +92,12 @@
     hide.style.cssText = "position:absolute;top:8px;right:10px;border:none;background:none;font-size:16px;line-height:1;color:#9a9585;cursor:pointer";
     hide.onclick = () => wrap.remove();
 
-    wrap.append(title, sub, btnFill, btnAuto, logEl, hide);
+    wrap.append(title, sub, btnAssemble, btnFill, logEl, hide);
     document.body.appendChild(wrap);
-    log("Ready. Paste the wizard's article here with Ctrl/Cmd+V, then click Fill captions & alt tags.");
+    log("Ready. Click Assemble article to build one here, or Fill captions & alt tags if you already pasted.");
 
+    btnAssemble.onclick = () => run(openAssemblyOverlay, btnAssemble);
     btnFill.onclick = () => run(fillAltAndCaptionsFlow, btnFill);
-    btnAuto.onclick = () => run(autoFlow, btnAuto);
     return wrap;
   }
 
@@ -110,6 +109,76 @@
     btn.disabled = false;
     btn.textContent = old;
   }
+
+  // -------- assembly overlay ------------------------------------------------------
+  // Full-viewport-ish overlay that loads the extension's own wizard.html in an iframe. Same code
+  // as the standalone wizard tab, no duplication — the wizard detects the embedded context via
+  // `window.parent !== window` and switches its "send" from chrome.runtime to postMessage to us.
+  // We receive the finished-article payload, tear the overlay down, then run the normal insert
+  // path (paste body -> fill alt -> fill captions) against the visible Medium editor beneath.
+  let overlayEl = null;
+  function openAssemblyOverlay() {
+    if (overlayEl) { overlayEl.style.display = "flex"; return; }
+    const shade = document.createElement("div");
+    shade.setAttribute("data-af-overlay", "1");
+    shade.style.cssText = [
+      "position:fixed", "inset:0", "z-index:2147483646", "background:rgba(20,22,28,.55)",
+      "display:flex", "align-items:center", "justify-content:center", "padding:24px",
+      "box-sizing:border-box",
+    ].join(";");
+    const shell = document.createElement("div");
+    shell.style.cssText = [
+      "position:relative", "width:min(1180px,96vw)", "height:min(92vh,1100px)",
+      "background:#fffdf9", "border-radius:16px", "overflow:hidden",
+      "box-shadow:0 20px 60px rgba(0,0,0,.35)",
+    ].join(";");
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "×";
+    closeBtn.title = "Close (progress will be lost)";
+    closeBtn.style.cssText = [
+      "position:absolute", "top:10px", "right:14px", "z-index:2", "width:32px", "height:32px",
+      "border-radius:16px", "border:none", "background:rgba(255,255,255,.9)",
+      "font-size:20px", "line-height:1", "color:#3a3d46", "cursor:pointer",
+      "box-shadow:0 2px 8px rgba(0,0,0,.15)",
+    ].join(";");
+    closeBtn.onclick = () => {
+      const ok = confirm("Close the assembly overlay? Anything you've filled in will be lost.");
+      if (ok) closeAssemblyOverlay();
+    };
+    const iframe = document.createElement("iframe");
+    iframe.src = chrome.runtime.getURL("wizard.html");
+    iframe.style.cssText = "width:100%;height:100%;border:0;display:block;background:#fffdf9";
+    iframe.setAttribute("data-af-overlay-frame", "1");
+    shell.append(closeBtn, iframe);
+    shade.appendChild(shell);
+    document.body.appendChild(shade);
+    overlayEl = shade;
+    log("Assembly overlay opened. Fill the article, then click Insert into draft.");
+  }
+  function closeAssemblyOverlay() {
+    if (!overlayEl) return;
+    overlayEl.remove();
+    overlayEl = null;
+    log("Overlay closed.");
+  }
+
+  // Bridge between the wizard iframe and this content script. The wizard posts to window.parent;
+  // that's us (this document). We validate the message shape, run the normal insert path, then
+  // reply so the wizard can show its own confirmation before self-closing.
+  window.addEventListener("message", async (e) => {
+    if (!e.data || typeof e.data !== "object") return;
+    if (e.data.type === "af-overlay-close") { closeAssemblyOverlay(); return; }
+    if (e.data.type !== "af-overlay-send") return;
+    ensurePanel(); // panel may not be built yet if user acted quickly
+    try {
+      log("Received article from the overlay — inserting…");
+      const summary = await insertArticle(e.data.payload || {});
+      try { e.source && e.source.postMessage({ type: "af-overlay-inserted", ok: true, summary }, "*"); } catch {}
+    } catch (err) {
+      log("Insert failed: " + (err && err.message || err), "err");
+      try { e.source && e.source.postMessage({ type: "af-overlay-inserted", ok: false, error: (err && err.message) || String(err) }, "*"); } catch {}
+    }
+  });
 
   // -------- helpers ----------------------------------------------------------------
   function waitFor(fn, timeout = 3000, interval = 100) {
@@ -455,12 +524,6 @@
     // populate the caption slot from the paste, so we finalize it via the same DOM automation.
     await fillCaptions(src.captions || []);
     return `inserted body; images in editor: ${got}.`;
-  }
-
-  async function autoFlow() {
-    const src = await getSource();
-    if (!src) return;
-    await insertArticle(src);
   }
 
   // -------- boot -------------------------------------------------------------------

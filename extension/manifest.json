@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Article Formatter — Medium",
-  "version": "0.2.1",
-  "description": "Self-contained wizard: assemble an article (title, body, diagrams, AI/external images, captions, alt) and send it straight into an open Medium draft.",
+  "version": "0.3.0",
+  "description": "Assemble an article (title, body, diagrams, AI/external images, captions, alt) inside an overlay right on your Medium draft, then insert.",
   "permissions": ["clipboardRead", "clipboardWrite", "tabs"],
   "host_permissions": [
     "https://medium.com/*",
@@ -15,6 +15,12 @@
       "matches": ["https://medium.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["wizard.html", "wizard.js", "wizard.css"],
+      "matches": ["https://medium.com/*"]
     }
   ]
 }

@@ -78,29 +78,24 @@
   <!-- STEP 7+8 · PREVIEW -->
   <section class="step locked" id="step-preview">
     <div class="step-head"><span class="n">6</span><h2>Preview &amp; edit</h2></div>
-    <p class="lead">The text below is editable, click into any paragraph and fix what you want.
-      Images carry their captions and alt tags. When it's right, send it to Medium.</p>
+    <p class="lead">The text below is editable — click into any paragraph and fix what you want.
+      Images carry their captions and alt tags. When it's right, insert into your draft.</p>
     <div class="preview-wrap">
       <article id="preview" contenteditable="true" spellcheck="false"></article>
     </div>
-    <p class="lead"><b>Open a Medium draft</b> in another tab first (Write → a new story, URL looks
-      like <code>medium.com/p/…/edit</code>). Then <b>Send to Medium draft</b> hosts every image,
-      pastes the whole article into that draft, and fills in each image's alt text automatically.</p>
     <div class="publish-row">
-      <button class="next big" id="send-medium">Send to Medium draft</button>
-      <button class="next" id="copy-medium">Copy for Medium · paste it yourself</button>
+      <button class="next big" id="send-medium">Insert into draft</button>
     </div>
-    <p class="lead" style="margin-top:6px"><b>Send to Medium draft</b> does it in one click. If your
-      browser blocks the automatic insert, use <b>Copy for Medium</b> instead — it copies the whole
-      article to your clipboard so you can press Ctrl/Cmd+V into the draft yourself, then click
-      <b>Fill alt tags</b> in the panel that appears on the Medium page. Either way the body goes
-      through Medium's paste handler, which (unlike its Import-a-story tool) keeps code blocks, the
-      ASCII table, and captions intact.</p>
+    <p class="lead" style="margin-top:6px">
+      <b>Insert into draft</b> hosts every image, pastes the article straight into your open Medium
+      draft, and fills in each image's alt text and caption automatically. Code blocks and the
+      ASCII table come through intact because it uses Medium's paste path, not its Import tool.
+    </p>
     <div id="publish-result" class="publish-result hidden"></div>
   </section>
 </main>
 
-<footer class="foot">Assemble here, then send straight into an open Medium draft</footer>
+<footer class="foot">Assemble here, then insert straight into the Medium draft below</footer>
 <script src="wizard.js"></script>
 </body>
 </html>

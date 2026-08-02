@@ -620,6 +620,16 @@ $("copy-medium")?.addEventListener("click", copyForMedium);
 // content script pastes the body (Medium's paste handler keeps code/ASCII/captions) and fills each
 // image's alt via Medium's alt dialog. `chrome` is defined because this runs as an extension page;
 // on the plain web app (no chrome.runtime) the button simply isn't present.
+// Two run modes:
+//   - Embedded (overlay iframe on a Medium draft page): the wizard talks to the parent Medium
+//     page via window.parent.postMessage. The content script running on that Medium page receives
+//     the payload and inserts directly into the visible editor. Zero tabs, no chrome.runtime hop.
+//   - Standalone (opened as its own tab via the toolbar action): the wizard sends through
+//     chrome.runtime to the background worker, which relays to whichever medium.com tab is open.
+const IS_EMBEDDED = (() => {
+  try { return window.parent && window.parent !== window; } catch { return false; }
+})();
+
 async function sendToMedium() {
   const res = $("publish-result");
   if (!res) return;
@@ -636,7 +646,27 @@ async function sendToMedium() {
     const captions = figs.map((f) => (f.querySelector("figcaption")?.textContent || "").trim());
     const payload = { bodyHTML: article.innerHTML, text: article.textContent, alts, captions };
 
-    res.textContent = "Sending to your open Medium draft…";
+    res.textContent = IS_EMBEDDED ? "Inserting into draft…" : "Sending to your open Medium draft…";
+    if (IS_EMBEDDED) {
+      // Fire-and-listen: post to parent, wait for its reply on this window.
+      const summary = await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("Medium page didn't respond within 60s")), 60000);
+        function onMsg(e) {
+          if (!e.data || e.data.type !== "af-overlay-inserted") return;
+          window.removeEventListener("message", onMsg);
+          clearTimeout(t);
+          if (e.data.ok) resolve(e.data.summary || "Inserted.");
+          else reject(new Error(e.data.error || "Insert failed"));
+        }
+        window.addEventListener("message", onMsg);
+        window.parent.postMessage({ type: "af-overlay-send", payload }, "*");
+      });
+      res.innerHTML = `<b>Inserted.</b> ${esc(summary)}<br>
+        <small>Closing this overlay — your article is now in the Medium draft below.</small>`;
+      // Ask the parent to close the overlay. Small delay so the user sees the confirmation.
+      setTimeout(() => { try { window.parent.postMessage({ type: "af-overlay-close" }, "*"); } catch {} }, 900);
+      return;
+    }
     const reply = await chrome.runtime.sendMessage({ type: "af-send", payload });
     if (!reply || !reply.ok) {
       throw new Error((reply && reply.error) || "No open Medium story-edit tab was found. Open a Medium draft (…/edit) in another tab, then try again.");
@@ -650,6 +680,15 @@ async function sendToMedium() {
   }
 }
 $("send-medium")?.addEventListener("click", sendToMedium);
+
+// When running as an overlay iframe on the Medium draft, relabel the primary button so it reads
+// naturally ("Insert into draft" — you're already IN the draft, no "send"). Also mark the body so
+// the panel host can spot us if it needs to.
+if (IS_EMBEDDED) {
+  const btn = $("send-medium");
+  if (btn) btn.textContent = "Insert into draft";
+  document.body.dataset.afEmbedded = "1";
+}
 
 // ---------- resume: reload a stored item's raw inputs back into the wizard ----------
 // Called either from the Manage page (via a ?resume=<pathname> link, since Manage is a separate
