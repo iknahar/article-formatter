@@ -19,9 +19,12 @@ A small wizard that assembles a publish-ready article:
    an image is placed, a **×** in the corner removes it and reverts the slot back to empty
 7. Press **Compile**
 8. Review the **editable preview** (captions and alt tags included)
-9. Press **Publish** — one click, fully automatic. Uploads the article and hands back a live
-   public link immediately. No token, no manual hand-off step. Or press **Save as draft**
-   instead to store it without publishing — drafts aren't limited or auto-deleted
+9. Press **Publish** — one click, fully automatic. Every image is uploaded to its own real,
+   independently-fetchable link first (needed for step 10 to actually bring images over — a
+   `data:`-embedded image has nothing a story importer can fetch, so it gets silently dropped
+   otherwise), then the article itself is uploaded and you get back a live public link
+   immediately. No token, no manual hand-off step. Or press **Save as draft** instead to store it
+   without publishing — drafts aren't limited or auto-deleted
 10. Paste that link into your publishing platform's story-import tool
 
 Only your **20 most recent** published articles stay live — publishing a new one automatically

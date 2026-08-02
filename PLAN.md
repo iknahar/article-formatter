@@ -163,6 +163,19 @@ management panel, and true resume/update.** (Current design, 2026-08-02.)
    the client can track it for the next overwrite), straight back in the
    same request. One click, no polling, no manual hand-off.
 
+**Images are uploaded separately, not embedded — see §5's dedicated bug
+entry.** Before the HTML in step 1 above is built, `app.js`'s
+`hostImagesInline(html)` finds every `<img>` still pointing at a `data:`
+URI (the compiled preview's default via `exportHTML()`), uploads each one
+individually to Blob storage via a new `POST /api/upload-image`
+(`api/upload-image.js` — same Private-store-plus-`/api/view` pattern as
+articles, just a different content type and a distinct `images/` prefix),
+and rewrites the `<img src>` to the real hosted URL that comes back.
+Images that are *already* hosted (e.g. after Resume, whose `<img src>` is
+already a real `/api/view` link, not `data:`) are correctly left alone —
+nothing to re-upload. This has to finish before `/api/publish` is called,
+so Publish/Save-as-draft now shows "Uploading images…" first.
+
 `GET /api/articles` (`api/articles.js`) lists everything under both
 `articles/` and `drafts/`, filtered to `.html` only (companions are an
 implementation detail, never shown as separate items), merged and sorted
@@ -441,6 +454,34 @@ anywhere in a slot card outside a real button forwards the click to its
 paste zone (`zone.click()`), so pasting or picking a file no longer
 requires aiming for the small dashed rectangle specifically.
 
+**Sixth bug, found the next day — a significant one, present since the
+very first publish:** the user imported a published article into Medium
+and every image was missing; only the text came through. Root cause:
+`exportHTML()` had always embedded every image as an inline `<img
+src="data:image/...;base64,...">` — fine for this app's own live preview,
+which just renders whatever `src` it's given, but Medium's "Import a
+story" tool (like most page-import/readability tools) works by fetching
+each `<img src>` over a real HTTP request so it can re-host the image on
+its own CDN. A `data:` URI isn't a network resource — there's nothing at
+that "address" to fetch — so the importer silently dropped every image
+while still successfully scraping the surrounding text, which is exactly
+what the user saw. **This affected every article published before this
+fix, not just the one reported.** Fixed by adding `POST
+/api/upload-image` (`api/upload-image.js`) — decodes a base64 `data:` URL,
+uploads the raw bytes to Blob storage under `images/` (same Private-store
+pattern as articles, own content type, served back through the *already
+generic* `/api/view` route — no changes needed there, it already streams
+whatever content type a blob has), and returns a real link. `app.js`'s new
+`hostImagesInline(html)` runs before every publish/draft-save: parses the
+compiled HTML, finds every `<img>` still on a `data:` URI, uploads each one
+(in parallel), and rewrites its `src` to the real hosted URL — only *then*
+does the resulting HTML go to `/api/publish`. Images that arrived already
+hosted (via Resume, whose `<img src>` is already a real `/api/view` link)
+are correctly skipped, so nothing gets re-uploaded on every re-save.
+**Not yet verified against a real Medium import** — the mechanism is
+sound and code-reviewed, but confirming the fix needs the user to publish
+something fresh and actually try importing it.
+
 ## 6. History note: the parallel-build mistake
 
 Earlier in this project the assistant was *not* told this app already
@@ -479,6 +520,13 @@ what the assistant will perform) or leave it archived/private.
 
 ## 8. Open TODOs
 
+- [ ] **Any article published before the §5 image-hosting fix still has
+  broken (data:-URI) images in its stored HTML** — the fix only applies to
+  future publishes, it doesn't retroactively repair what's already in
+  Blob storage. If old articles matter, they need to be re-published
+  (Resume → Compile → Publish again) to pick up real hosted image URLs.
+- [ ] Confirm the §5 image-hosting fix actually works by publishing
+  something fresh and importing it into Medium for real — not yet done.
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
   private, or delete it themselves) — this repo doesn't exist anymore as of
   this writing (user deleted it), so this item is effectively resolved,

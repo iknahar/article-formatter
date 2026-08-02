@@ -425,18 +425,44 @@ function buildSnapshot() {
   };
 }
 
-// One click, fully automatic: posts the compiled HTML (plus a raw-input snapshot for Resume) to
-// /api/publish (a Vercel serverless function backed by Vercel Blob storage). The endpoint uploads
-// it, gets a real public URL back immediately, and — for a real publish, not a draft — enforces a
-// rolling window (MAX_ARTICLES most recent stay live, older ones deleted automatically). Requires
-// this app to be deployed on Vercel with a Blob store connected (a static host like GitHub Pages
-// has no serverless runtime, so /api/publish 404s there — see README).
+// Medium's story importer (and most "import a page" tools) fetch each <img src> over HTTP to
+// re-host it on their own CDN. A data: URI has nothing to fetch — no separate network resource
+// exists — so images embedded that way (exportHTML's default, for the live in-app preview) were
+// silently dropped on import even though the text came through fine. Fixed by uploading each
+// still-data:-URI image to its own real Blob URL via /api/upload-image and rewriting the <img
+// src> to point there before the HTML goes to /api/publish. Images already hosted from an
+// earlier publish (e.g. after Resume, whose src is already a real /api/view link, not data:)
+// are correctly skipped — nothing to re-upload.
+async function hostImagesInline(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const imgs = [...doc.querySelectorAll("img")].filter((img) => (img.getAttribute("src") || "").startsWith("data:"));
+  await Promise.all(imgs.map(async (img) => {
+    const r = await fetch("/api/upload-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataURL: img.getAttribute("src") }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `Image upload failed (${r.status})`);
+    img.setAttribute("src", data.url);
+  }));
+  return "<!doctype html>" + doc.documentElement.outerHTML;
+}
+
+// One click, fully automatic: uploads any not-yet-hosted images first (see hostImagesInline
+// above), then posts the resulting HTML (plus a raw-input snapshot for Resume) to /api/publish
+// (a Vercel serverless function backed by Vercel Blob storage). The endpoint uploads it, gets a
+// real public URL back immediately, and — for a real publish, not a draft — enforces a rolling
+// window (MAX_ARTICLES most recent stay live, older ones deleted automatically). Requires this
+// app to be deployed on Vercel with a Blob store connected (a static host like GitHub Pages has
+// no serverless runtime, so /api/publish 404s there — see README).
 async function publishArticle(isDraft) {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
-  res.textContent = isDraft ? "Saving draft…" : "Publishing…";
+  res.textContent = "Uploading images…";
   try {
-    const html = exportHTML();
+    const html = await hostImagesInline(exportHTML());
+    res.textContent = isDraft ? "Saving draft…" : "Publishing…";
     const prefix = isDraft ? "drafts/" : "articles/";
     const overwritePathname = resumedPathname && resumedPathname.startsWith(prefix) ? resumedPathname : undefined;
     const r = await fetch("/api/publish", {
