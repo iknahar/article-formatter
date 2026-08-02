@@ -225,35 +225,43 @@
     await fillAlts(src.alts);
   }
 
-  async function autoFlow() {
-    const src = await getSource();
-    if (!src) return;
+  // Insert a whole article: synthetic-paste the body, wait for Medium's async image uploads to
+  // settle, then fill alt. Shared by the on-page "Auto-insert" button and the wizard→background
+  // message. `src` is { bodyHTML, text, alts }. Returns a short summary string.
+  async function insertArticle(src) {
     const ed = findEditor();
-    if (!ed) { log("Couldn't find the Medium editor on this page.", "err"); return; }
+    if (!ed) { log("Couldn't find the Medium editor on this page.", "err"); return "editor not found"; }
     log("Inserting body via a synthetic paste…");
     placeCaretAtEnd(ed);
     const dt = new DataTransfer();
     dt.setData("text/html", src.bodyHTML);
-    dt.setData("text/plain", src.text);
+    dt.setData("text/plain", src.text || "");
     ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
 
     log("Waiting for images to finish uploading…");
-    // Poll until the figure count is stable for a moment (Medium uploads images async).
+    const wantImgs = (src.alts || []).length;
     const start = Date.now();
     let last = -1, stableSince = Date.now();
     while (Date.now() - start < 45000) {
       const nnow = document.querySelectorAll("figure.graf--figure").length;
       if (nnow !== last) { last = nnow; stableSince = Date.now(); }
-      else if (nnow >= src.alts.length && Date.now() - stableSince > 1800) break;
+      else if (nnow >= wantImgs && Date.now() - stableSince > 1800) break;
       await sleep(350);
     }
     const got = document.querySelectorAll("figure.graf--figure").length;
-    if (!got) {
+    if (!got && wantImgs) {
       log("No images appeared — the synthetic paste probably didn't take in this browser.", "err");
-      log("Use the manual path: press Ctrl/Cmd+V yourself, then click Fill alt tags.", "warn");
-      return;
+      log("Fallback: use Copy for Medium in the wizard, press Ctrl/Cmd+V here yourself, then Fill alt tags.", "warn");
+      return "body did not insert (synthetic paste blocked). Use manual paste + Fill alt tags.";
     }
-    await fillAlts(src.alts);
+    await fillAlts(src.alts || []);
+    return `inserted body; images in editor: ${got}.`;
+  }
+
+  async function autoFlow() {
+    const src = await getSource();
+    if (!src) return;
+    await insertArticle(src);
   }
 
   // -------- boot -------------------------------------------------------------------
@@ -267,4 +275,21 @@
   ensurePanel();
   const mo = new MutationObserver(() => ensurePanel());
   mo.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Receive a finished article from the wizard tab (relayed by the background worker) and insert it.
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== "af-insert") return;
+    ensurePanel(); // make sure the log panel exists so progress is visible
+    (async () => {
+      try {
+        log("Received article from the wizard — inserting…");
+        const summary = await insertArticle(msg.payload || {});
+        sendResponse({ ok: true, summary });
+      } catch (err) {
+        log("Insert failed: " + (err && err.message || err), "err");
+        sendResponse({ ok: false, error: (err && err.message) || String(err) });
+      }
+    })();
+    return true; // async sendResponse
+  });
 })();

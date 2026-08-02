@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Article Formatter</title>
+<!-- No remote font link: an extension page's CSP blocks remote stylesheets. The CSS falls back to
+     the system font stack, which is fine. -->
+<link rel="stylesheet" href="wizard.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">AF</span> Article Formatter</div>
+  <nav class="pillnav">
+    <span class="pill-tab active">Compose → Medium</span>
+  </nav>
+</header>
+
+<main>
+  <h1 class="welcome">Let's write one</h1>
+  <p class="welcome-sub">Title → Subtitle → Body → Diagrams → Images → Compile → Preview → Send to Medium</p>
+
+  <!-- STEP 1 · TITLE -->
+  <section class="step" id="step-title">
+    <div class="step-head"><span class="n">1</span><h2>Title</h2></div>
+    <p class="lead">The headline of your story, exactly as it should appear on your published page.</p>
+    <input type="text" id="title" placeholder="The 100-Year-Old Grudge That Finishes Your Sentences" autocomplete="off">
+    <button class="next" data-goto="step-subtitle">Next · Subtitle</button>
+  </section>
+
+  <!-- STEP 2 · SUBTITLE -->
+  <section class="step locked" id="step-subtitle">
+    <div class="step-head"><span class="n">2</span><h2>Subtitle</h2></div>
+    <p class="lead">The line shown under the title.</p>
+    <input type="text" id="subtitle" placeholder="A beginner's tour with real stories, diagrams, and working code" autocomplete="off">
+    <button class="next" data-goto="step-body">Next · Body copy</button>
+  </section>
+
+  <!-- STEP 3 · BODY -->
+  <section class="step locked" id="step-body">
+    <div class="step-head"><span class="n">3</span><h2>Body copy</h2></div>
+    <p class="lead">Paste the whole thing, SEO suite and all — parsing automatically starts right
+      after a line reading "the body" or "the article", wherever that falls. Markers like
+      <code>**[Place Diagram 2 → folder/file.png]**</code>,
+      <code>**[Place Image 9 → AI generated, prompt 9 at the end]**</code> and
+      <code>**[Place Image 3 → external, search "keyword"]**</code> are detected automatically
+      (the number is optional), along with their <code>*Caption →*</code> and <code>*Alt →*</code>
+      lines and the <code>**Prompt N**</code> paragraphs at the end.</p>
+    <textarea id="body" rows="14" placeholder="# Heading&#10;&#10;Paragraph text...&#10;&#10;**[Place Diagram 2 → markov-chains-diagrams/d15_pushkin.png]**&#10;*Caption → ...*&#10;*Alt → ...*"></textarea>
+    <button class="next" id="analyze">Analyze body · Next</button>
+    <div id="analysis" class="analysis hidden"></div>
+  </section>
+
+  <!-- STEP 4 · DIAGRAM FOLDER -->
+  <section class="step locked" id="step-diagrams">
+    <div class="step-head"><span class="n">4</span><h2>Diagram folder</h2></div>
+    <p class="lead">Select the folder that holds your diagram PNG/JPG/WEBP files. They're matched to the markers by filename.</p>
+    <label class="folder-btn">Choose diagram folder
+      <input type="file" id="diagram-folder" webkitdirectory multiple accept="image/*">
+    </label>
+    <div id="diagram-status" class="slot-grid"></div>
+    <button class="next" data-goto="step-images">Next · Images</button>
+  </section>
+
+  <!-- STEP 5+6 · AI + EXTERNAL IMAGES -->
+  <section class="step locked" id="step-images">
+    <div class="step-head"><span class="n">5</span><h2>AI &amp; external images</h2></div>
+    <p class="lead">For each AI image, copy the prompt into your generator, then click the 3:2 frame and paste the result
+      (Ctrl+V). External images show the search keyword, find the image, copy it, and paste the same way.
+      Drag &amp; drop or click-to-browse also works.</p>
+    <h3 class="group-title" id="ai-title">AI generated images</h3>
+    <div id="ai-slots" class="slot-grid"></div>
+    <h3 class="group-title" id="ext-title">External images</h3>
+    <div id="ext-slots" class="slot-grid"></div>
+    <button class="next big" id="compile">Compile article</button>
+  </section>
+
+  <!-- STEP 7+8 · PREVIEW -->
+  <section class="step locked" id="step-preview">
+    <div class="step-head"><span class="n">6</span><h2>Preview &amp; edit</h2></div>
+    <p class="lead">The text below is editable, click into any paragraph and fix what you want.
+      Images carry their captions and alt tags. When it's right, send it to Medium.</p>
+    <div class="preview-wrap">
+      <article id="preview" contenteditable="true" spellcheck="false"></article>
+    </div>
+    <p class="lead"><b>Open a Medium draft</b> in another tab first (Write → a new story, URL looks
+      like <code>medium.com/p/…/edit</code>). Then <b>Send to Medium draft</b> hosts every image,
+      pastes the whole article into that draft, and fills in each image's alt text automatically.</p>
+    <div class="publish-row">
+      <button class="next big" id="send-medium">Send to Medium draft</button>
+      <button class="next" id="copy-medium">Copy for Medium · paste it yourself</button>
+    </div>
+    <p class="lead" style="margin-top:6px"><b>Send to Medium draft</b> does it in one click. If your
+      browser blocks the automatic insert, use <b>Copy for Medium</b> instead — it copies the whole
+      article to your clipboard so you can press Ctrl/Cmd+V into the draft yourself, then click
+      <b>Fill alt tags</b> in the panel that appears on the Medium page. Either way the body goes
+      through Medium's paste handler, which (unlike its Import-a-story tool) keeps code blocks, the
+      ASCII table, and captions intact.</p>
+    <div id="publish-result" class="publish-result hidden"></div>
+  </section>
+</main>
+
+<footer class="foot">Assemble here, then send straight into an open Medium draft</footer>
+<script src="wizard.js"></script>
+</body>
+</html>

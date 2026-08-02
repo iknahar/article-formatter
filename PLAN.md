@@ -710,6 +710,49 @@ what the assistant will perform) or leave it archived/private.
   the italic paragraph the paste produces (not moved into Medium's native
   `figcaption`); alt-matching is by figure order (warns if the editor's
   image count differs from the clipboard article's).
+
+  **UPDATE (later same day): user chose to make the extension fully
+  self-contained** — the whole wizard lives inside the extension, opened
+  from the toolbar, and step 6 sends the article straight into an open
+  Medium draft (no web app, no manual copy/import). Built as v0.2.0:
+  - `extension/wizard.html` / `wizard.js` / `wizard.css` are copies of the
+    web app's `index.html` / `app.js` / `style.css` with minimal edits:
+    remote Google-Fonts `<link>` dropped (extension-page CSP blocks remote
+    stylesheets; system-font fallback), local file refs, the Publish/Save-
+    as-draft/Manage link-flow UI removed, the `/api/upload-image` call
+    repointed to the absolute deployed URL (`AF_API_BASE`), the link-flow
+    button listeners optional-chained so their absence doesn't throw, and a
+    new **Send to Medium draft** button wired to `sendToMedium()`. Copy for
+    Medium is kept as the manual fallback.
+  - `extension/background.js` (service worker): toolbar click opens/focuses
+    the wizard tab; relays the finished `{bodyHTML, text, alts}` from the
+    wizard tab to the content script in an open `medium.com/*/edit` tab
+    (the two tabs can't talk directly).
+  - `extension/content.js`: refactored the paste+alt logic into a shared
+    `insertArticle(src)` and added a `chrome.runtime.onMessage` listener so
+    the same insert runs when triggered from the wizard, not just the
+    on-page buttons.
+  - `manifest.json` → v0.2.0: added `action` (no popup, so
+    `action.onClicked` opens the wizard), `background` service worker,
+    `tabs` + `clipboardWrite` permissions, and the vercel host permission
+    for the image-hosting call.
+
+  Deliberate consequence the user accepted: the wizard code is now
+  **duplicated** between the web app and the extension (two copies of the
+  parse/compile/preview logic to keep in sync). Image hosting still routes
+  through the deployed `/api/upload-image` so a Medium paste can fetch real
+  image URLs — so "self-contained" means the UI, not zero backend; the API
+  must stay deployed. Dropping that backend would require pasted `data:`
+  images to upload reliably into Medium, which is untested.
+
+  **Still NOT verified in a browser** (same limitation): the toolbar→wizard
+  page load, extension-page CSP behaviour, cross-tab messaging, the
+  synthetic-paste body insert, and the alt-dialog automation are all
+  unexercised here. The one-click **Send to Medium draft** depends on the
+  synthetic paste being accepted by Medium's handler; if it isn't, the
+  documented fallback (Copy for Medium → manual Ctrl/Cmd+V → Fill alt tags)
+  uses only proven pieces. Pending user test — the panel logs each step so
+  failures are reportable.
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
   private, or delete it themselves) — this repo doesn't exist anymore as of
   this writing (user deleted it), so this item is effectively resolved,
