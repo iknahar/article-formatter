@@ -55,11 +55,11 @@
     title.textContent = "Article Formatter";
     title.style.cssText = "font-weight:700;font-size:13.5px;margin-bottom:2px";
 
-    // Everything the panel does, spelled out in one line — no separate Advanced section, no
-    // hidden buttons. Ordering matches how the user actually uses it: build the article in the
-    // wizard, paste into this draft, click Fill captions & alt tags.
+    // Everything the panel does, in one line. Two buttons — the primary one is what runs after
+    // you've pasted the article; the auto-insert beta path stays available for users who want to
+    // try the one-click end-to-end.
     const sub = document.createElement("div");
-    sub.innerHTML = '1) Build the article in the <b>wizard</b>. 2) Paste it here with Ctrl/Cmd+V. 3) Click <b>Fill captions &amp; alt tags</b>.';
+    sub.innerHTML = 'Paste the wizard’s article with Ctrl/Cmd+V, then click <b>Fill captions &amp; alt tags</b>.';
     sub.style.cssText = "color:#6d6f78;font-size:11.5px;margin-bottom:9px";
 
     const btnStyle = [
@@ -75,10 +75,6 @@
     const btnFill = document.createElement("button");
     btnFill.textContent = "Fill captions & alt tags";
     btnFill.style.cssText = btnStyle;
-
-    const btnOpen = document.createElement("button");
-    btnOpen.textContent = "Open the wizard";
-    btnOpen.style.cssText = outlineStyle;
 
     const btnAuto = document.createElement("button");
     btnAuto.textContent = "Auto-insert body + captions + alt (beta)";
@@ -97,17 +93,11 @@
     hide.style.cssText = "position:absolute;top:8px;right:10px;border:none;background:none;font-size:16px;line-height:1;color:#9a9585;cursor:pointer";
     hide.onclick = () => wrap.remove();
 
-    wrap.append(title, sub, btnFill, btnOpen, btnAuto, logEl, hide);
+    wrap.append(title, sub, btnFill, btnAuto, logEl, hide);
     document.body.appendChild(wrap);
     log("Ready. Paste the wizard's article here with Ctrl/Cmd+V, then click Fill captions & alt tags.");
 
     btnFill.onclick = () => run(fillAltAndCaptionsFlow, btnFill);
-    btnOpen.onclick = () => run(async () => {
-      log("Opening the wizard in a new tab…");
-      const reply = await chrome.runtime.sendMessage({ type: "af-open-wizard" });
-      if (!reply || !reply.ok) log("Couldn't open the wizard: " + ((reply && reply.error) || "no response"), "err");
-      else log("Wizard opened — switch to that tab to assemble your article.", "ok");
-    }, btnOpen);
     btnAuto.onclick = () => run(autoFlow, btnAuto);
     return wrap;
   }
@@ -193,43 +183,102 @@
     return { bodyHTML: doc.body.innerHTML, text: doc.body.textContent, alts, captions };
   }
 
-  // Fill Medium's own per-figure caption slot by typing directly into its contenteditable
+  // Fill Medium's own per-figure caption slot by driving its contenteditable
   // <figcaption class="imageCaption">. Empty state ships as
   //   <figure class="graf--figure is-defaultValue">
   //     …<figcaption><span class="defaultValue">Type caption…</span><br></figcaption>
   //   </figure>
-  // and turns into plain text after real typing (parent loses "is-defaultValue"). We mirror that
-  // real-typing shape: focus the figcaption, select its contents (placeholder span + <br>), then
-  // execCommand insertText — the same synthetic keystroke path we already use successfully for the
-  // alt-text dialog. A final InputEvent nudge covers editors that watch specifically for it.
+  // and turns into plain text after real typing (parent loses "is-defaultValue"). The v0.2.x
+  // approach (focus + selectContents + execCommand insertText) failed 17/17 in a real test — the
+  // alt-text dialog accepts execCommand fine because it's a plain modal contenteditable, but the
+  // figcaption sits inside Medium's rich-text editor framework which appears to require:
+  //   (a) a real mouse click on the figcaption to clear the placeholder-on-focus state,
+  //   (b) the placeholder <span class="defaultValue"> to be physically removed, and
+  //   (c) the parent figure's is-defaultValue class to be cleared explicitly.
+  // We do all three, then insertText. Multiple fallbacks in sequence (paste event, direct
+  // DOM textContent) run only if the primary attempt didn't stick, so we don't spend time on
+  // fallbacks when the primary works. Each attempt reports its outcome to the log.
   async function setCaption(figure, captionText) {
     if (!captionText) return false;
     const fc = figure.querySelector("figcaption.imageCaption") || figure.querySelector("figcaption");
     if (!fc) return false;
     fc.scrollIntoView({ block: "center" });
     await sleep(80);
-    fc.focus();
-    await sleep(60);
-    const range = document.createRange();
-    range.selectNodeContents(fc);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    document.execCommand("insertText", false, captionText);
-    // Belt & braces: dispatch a real InputEvent in case Medium's model listens for it directly
-    // rather than for execCommand's own synthetic event.
-    try {
-      fc.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: false, data: captionText, inputType: "insertText" }));
-    } catch { /* older browsers: fall through */ }
-    await sleep(50);
-    fc.blur();
-    // Sanity signal for the log: if Medium still marks the figure as default-value, it didn't
-    // pick up our change — report so it's visible without silent-fail.
-    if (figure.classList.contains("is-defaultValue")) {
-      log("Figcaption still shows placeholder — Medium didn't pick up the change on this one.", "warn");
-      return false;
+    const target = (captionText || "").trim();
+    const stuck = () => fc.textContent.trim() === target && !figure.classList.contains("is-defaultValue");
+    const clearPlaceholder = () => {
+      fc.querySelectorAll(".defaultValue").forEach((n) => n.remove());
+      // A trailing <br> is Medium's empty-caption marker; strip it so our text is the only content.
+      const brs = fc.querySelectorAll("br");
+      brs.forEach((br) => br.remove());
+      figure.classList.remove("is-defaultValue");
+    };
+    const selectAllIn = () => {
+      const range = document.createRange();
+      range.selectNodeContents(fc);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    const fireInput = () => {
+      try {
+        fc.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: false, data: target, inputType: "insertText" }));
+      } catch { /* ignore */ }
+    };
+
+    // The important insight (from live user observation): the IMAGE is what needs the click, not
+    // the figcaption. Clicking the image is what activates Medium's "figure selected" state (green
+    // outline appears, `figure` gets `is-selected`, the caption slot below becomes writable).
+    // Clicking the figcaption directly without first selecting the image was a no-op — Medium's
+    // editor didn't treat the figcaption as focused-for-typing until the parent figure was
+    // selected, which is why every attempt in the previous version returned "still shows
+    // placeholder" for 17/17 images.
+    const img = figure.querySelector("img.graf-image") || figure.querySelector("img");
+    if (img) {
+      fireMouse(img, "mousedown"); fireMouse(img, "mouseup"); fireMouse(img, "click");
+      // Wait for Medium to mark the figure as selected — that's the signal the caption slot is live.
+      await waitFor(() => figure.classList.contains("is-selected"), 1500, 60);
+      await sleep(80);
     }
-    return true;
+
+    // Attempt A: click into the figcaption, clear its placeholder, insertText.
+    fireMouse(fc, "mousedown"); fireMouse(fc, "mouseup"); fireMouse(fc, "click");
+    await sleep(60);
+    fc.focus();
+    await sleep(40);
+    clearPlaceholder();
+    selectAllIn();
+    document.execCommand("insertText", false, target);
+    fireInput();
+    await sleep(120);
+    if (stuck()) return true;
+
+    // Attempt B: synthetic paste event scoped to the figcaption (same mechanism that ingests
+    // pasted Google-Docs content into the body correctly).
+    fc.focus(); await sleep(30);
+    clearPlaceholder();
+    selectAllIn();
+    try {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", target);
+      fc.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    } catch { /* ignore */ }
+    await sleep(150);
+    if (stuck()) return true;
+
+    // Attempt C: direct DOM assignment + input event. If Medium's editor reads the DOM on
+    // input, this convinces it. If its model overrides the DOM on next tick, this will revert
+    // and stuck() returns false — we report that specifically so the user knows the failure
+    // mode is model-level and manual typing is the workaround for those.
+    while (fc.firstChild) fc.removeChild(fc.firstChild);
+    fc.appendChild(document.createTextNode(target));
+    figure.classList.remove("is-defaultValue");
+    fireInput();
+    await sleep(200);
+    if (stuck()) return true;
+
+    log(`  Caption didn't stick. figcaption.textContent = "${fc.textContent.slice(0, 40)}", is-defaultValue=${figure.classList.contains("is-defaultValue")}`, "warn");
+    return false;
   }
 
   async function fillCaptions(captions) {
