@@ -60,19 +60,22 @@ $("analyze").addEventListener("click", () => {
   unlock("step-diagrams"); scrollTo_("step-diagrams");
 });
 
-// marker forms accepted:
+// marker forms accepted (bracket may be followed by same-line or next-line Caption/Alt):
 //  **[Place Diagram 2 → path/file.png]**   |  [Diagram 2 · path]
 //  **[Place Image 9 → AI generated, prompt 9 at the end]** | [Image 9 · AI generated · ...]
 //  **[Place Image 3 → external, search "keyword"]** | [Image 3 · external · search "kw"]
-const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image)\s+(\d+)\s*(?:→|·|-|—)\s*(.+?)\]\*{0,2}\s*$/i;
+//  **[Image 6 → Place Diagram → diagrams/foo.png]** *Caption → ...* *Alt → ...*   (all one line, kind inferred from content, not just the label word)
+const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image)\s+(\d+)\s*(?:→|·|-|—)\s*([^\]]+?)\]\*{0,2}\s*(.*)$/i;
 const CAPTION_RE = /^\*{1,2}Caption\s*→\s*(.+?)\*{1,2}\s*$/i;
 const ALT_RE = /^\*{1,2}Alt\s*→\s*(.+?)\*{1,2}\s*$/i;
-const PROMPT_RE = /^\*\*Prompt\s+(\d+)[,.]?\s*([^*]*)\*\*\s*(.*)$/i;
+const INLINE_CAP_ALT_RE = /Caption\s*→\s*(.*?)\s*Alt\s*→\s*(.*)$/i;
+// unwrap markdown emphasis so brackets/captions read as plain text regardless of ** / * wrapping
+const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
 
 function parseBody(raw) {
   state.blocks = []; state.prompts = {}; state.slots = [];
   const lines = raw.replace(/\r/g, "").split("\n");
-  let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false;
+  let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false, curPromptKey = null;
 
   const flushPara = () => {
     const text = paraBuf.join(" ").trim();
@@ -91,13 +94,25 @@ function parseBody(raw) {
     if (inCode) { codeBuf.push(line); i++; continue; }
 
     const t = line.trim();
-    const pm = t.match(PROMPT_RE);
-    if (pm) { flushPara(); state.prompts[pm[1]] = (pm[3] || pm[2] || "").trim(); i++; continue; }
+    const tClean = stripEmph(t);
+
+    // appendix prompt harvesting: "Prompt N, text..." (text inline) or "Image N · label" (label
+    // discarded, the real prompt is the following paragraph line(s))
+    const pm = tClean.match(/^Prompt\s+(\d+)\b[,.]?\s*(.*)$/i);
+    const im = !pm && tClean.match(/^Image\s+(\d+)\b[\s·:.,-]*(.*)$/i);
+    if (pm) { flushPara(); curPromptKey = pm[1]; state.prompts[curPromptKey] = (pm[2] || "").trim(); i++; continue; }
+    if (im) { flushPara(); curPromptKey = im[1]; state.prompts[curPromptKey] = ""; i++; continue; }
+    if (skipSection && curPromptKey != null && t) {
+      state.prompts[curPromptKey] = (state.prompts[curPromptKey] ? state.prompts[curPromptKey] + " " : "") + tClean;
+      i++; continue;
+    }
 
     const hm = t.match(/^(#{1,3})\s+(.*)$/);
     if (hm) {
       flushPara();
+      const wasAppendix = skipSection;
       skipSection = /image prompts/i.test(hm[2]);  // drop the prompt appendix from the article
+      if (wasAppendix && !skipSection) curPromptKey = null;  // leaving the appendix, stop accumulating
       if (!skipSection) state.blocks.push({ type: "h" + hm[1].length, text: hm[2].trim() });
       i++; continue;
     }
@@ -105,12 +120,12 @@ function parseBody(raw) {
     const mm = t.match(MARKER_RE);
     if (mm) {
       flushPara();
-      const num = mm[2], payload = mm[3].trim();
+      const num = mm[2], payload = mm[3].trim(), restSameLine = stripEmph((mm[4] || "").trim());
       let slot;
       if (/^diagram$/i.test(mm[1]) || /\.(png|jpe?g|webp|avif|gif)\s*$/i.test(payload)) {
         const base = payload.split(/[\\/]/).pop().replace(/\.(png|jpe?g|webp|avif|gif)$/i, "").toLowerCase();
         slot = { kind: "diagram", num, file: base, label: payload };
-      } else if (/ai generated/i.test(payload)) {
+      } else if (/ai[- ]?generated/i.test(payload)) {
         slot = { kind: "ai", num, label: payload };
       } else if (/external/i.test(payload)) {
         const kw = (payload.match(/["“]([^"”]+)["”]/) || [, payload.replace(/external[,·]?\s*(search)?/i, "").trim()])[1];
@@ -118,15 +133,21 @@ function parseBody(raw) {
       } else {
         slot = { kind: "ai", num, label: payload };
       }
-      // caption / alt on following lines
+      // caption / alt: same line as the bracket first, then following lines as a fallback
       let j = i + 1;
-      while (j < lines.length) {
-        const s = lines[j].trim();
-        if (!s) { j++; continue; }
-        const cm = s.match(CAPTION_RE), am = s.match(ALT_RE);
-        if (cm) { slot.caption = cm[1].trim(); j++; continue; }
-        if (am) { slot.alt = am[1].trim(); j++; continue; }
-        break;
+      const inlineCA = restSameLine.match(INLINE_CAP_ALT_RE);
+      if (inlineCA) {
+        slot.caption = inlineCA[1].replace(/\*+/g, "").trim();
+        slot.alt = inlineCA[2].replace(/\*+/g, "").trim();
+      } else {
+        while (j < lines.length) {
+          const s = lines[j].trim();
+          if (!s) { j++; continue; }
+          const cm = s.match(CAPTION_RE), am = s.match(ALT_RE);
+          if (cm) { slot.caption = cm[1].trim(); j++; continue; }
+          if (am) { slot.alt = am[1].trim(); j++; continue; }
+          break;
+        }
       }
       i = j;
       slot.dataURL = null;
@@ -339,9 +360,7 @@ pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font
 <style>${css}</style></head><body><article>${body.innerHTML}</article></body></html>`;
 }
 
-// destination select + token persistence
-$("dest").addEventListener("change", () =>
-  $("gh-config").classList.toggle("hidden", $("dest").value !== "github"));
+// GitHub Pages token persistence
 $("gh-token").value = localStorage.getItem("gh-token") || "";
 $("gh-token").addEventListener("change", () =>
   localStorage.setItem("gh-token", $("gh-token").value.trim()));
@@ -380,28 +399,14 @@ async function publishToGitHub(html) {
            note: "GitHub Pages takes ~1 minute to rebuild. If the link 404s, wait a moment and refresh before importing." };
 }
 
-async function publishToVercel(html) {
-  const r = await fetch("/api/publish", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ slug: slugify(), html }),
-  });
-  let data;
-  try { data = await r.json(); } catch { data = { error: `Server said ${r.status} ${r.statusText}` }; }
-  if (!r.ok) throw new Error(data.error || r.statusText);
-  return { url: data.url, note: "" };
-}
-
 $("publish").addEventListener("click", async () => {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
   res.textContent = "Publishing…";
   try {
     const html = exportHTML();
-    const out = $("dest").value === "github"
-      ? await publishToGitHub(html)
-      : await publishToVercel(html);
-    res.innerHTML = `<b>Published.</b> Paste this link into Medium → Import a story.<br>
+    const out = await publishToGitHub(html);
+    res.innerHTML = `<b>Published.</b> Copy this link and use it wherever you need to import the story.<br>
       <a href="${out.url}" target="_blank" rel="noopener">${out.url}</a>
       <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
       ${out.note ? `<br><small>${esc(out.note)}</small>` : ""}`;
@@ -409,8 +414,7 @@ $("publish").addEventListener("click", async () => {
   } catch (err) {
     res.classList.add("error");
     res.innerHTML = `<b>Publish failed.</b> ${esc(err.message)}<br>
-      GitHub Pages route, check the token and that Pages is enabled (README has the steps).
-      Vercel route, check the Blob store is connected.
+      Check the token and that Pages is enabled (README has the steps).
       Either way <b>Download HTML instead</b> always works.`;
   }
 });

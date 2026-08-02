@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Article Formatter · Medium import builder</title>
+<title>Article Formatter</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,7 +16,7 @@
   <!-- STEP 1 · TITLE -->
   <section class="step" id="step-title">
     <div class="step-head"><span class="n">1</span><h2>Title</h2></div>
-    <p class="lead">The headline of your story, exactly as it should appear on Medium.</p>
+    <p class="lead">The headline of your story, exactly as it should appear on your published page.</p>
     <input type="text" id="title" placeholder="The 100-Year-Old Grudge That Finishes Your Sentences" autocomplete="off">
     <button class="next" data-goto="step-subtitle">Next · Subtitle</button>
   </section>
@@ -76,11 +76,7 @@
       <article id="preview" contenteditable="true" spellcheck="false"></article>
     </div>
     <div class="dest-box">
-      <label class="dest-label">Publish destination</label>
-      <select id="dest">
-        <option value="github">GitHub Pages (unique URL under iknahar.github.io)</option>
-        <option value="vercel">Vercel Blob (needs the Blob store connected)</option>
-      </select>
+      <label class="dest-label">Publish to GitHub Pages</label>
       <div id="gh-config">
         <div class="gh-row">
           <input type="text" id="gh-owner" value="iknahar" placeholder="owner">
@@ -92,14 +88,14 @@
       </div>
     </div>
     <div class="publish-row">
-      <button class="next big" id="publish">Publish · get Medium import link</button>
+      <button class="next big" id="publish">Publish · get shareable link</button>
       <button class="ghost" id="download">Download HTML instead</button>
     </div>
     <div id="publish-result" class="publish-result hidden"></div>
   </section>
 </main>
 
-<footer class="foot">Built for the Medium import workflow · paste the published link at medium.com → Import a story</footer>
+<footer class="foot">Publish, then paste the link into your platform's story-import tool</footer>
 <script src="app.js"></script>
 </body>
 </html>
