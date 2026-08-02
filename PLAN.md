@@ -510,12 +510,54 @@ the bare `<pre>`), errored internally, and gave up on everything after
 that point rather than skipping the one bad element and continuing —
 consistent with the truncation point falling not too long after the
 article's first image/diagram. If that's right, fixing the images and
-code blocks should also fix the truncation, since the trigger is gone. **Not
-verified** — this needs the user to publish fresh (with the images-plus-
-code-blocks fix now live) and re-import to confirm the article comes
-through complete. If it *still* truncates at the same point, the cause is
-something else in the markup and needs the actual cutoff point identified
-from a real re-test to diagnose further.
+code blocks should also fix the truncation, since the trigger is gone.
+
+**Confirmed the same day, from the user pasting the actual rendered
+Medium draft DOM after a real import:** images and code blocks (including
+the ASCII-art fridge-box block) now come through completely and correctly
+— the images-plus-code-blocks fix above is verified working, and the
+truncation theory is borne out (the article came through in full, past
+the point where earlier imports used to cut off). Two more issues showed
+up in that same draft dump, found and fixed together:
+
+1. **Empty code block appearing right after a real one.** Root cause:
+   `parseBody()`'s fence-closing logic (in the ` ``` ` handler) pushed a
+   `{type:"code"}` block unconditionally whenever a closing fence was hit,
+   even if `codeBuf` was empty or whitespace-only — which happens when two
+   fence markers end up adjacent with nothing meaningful between them
+   (an artifact of the upstream article-writing session's formatting,
+   not something this app's parser caused). The result was a genuinely
+   blank `<pre><code></code></pre>` box rendered immediately after a real
+   code block. This is the same bug the user had independently described
+   twice before under different names — "unwanted space on import" (the
+   gap after "The Freeze Move" heading) and "Ascii table is broken" (a
+   correct boxed ASCII table followed by an empty scrolled box) were both
+   this one root cause, just manifesting at different points in the
+   article. Fixed by guarding the push: `if (!skipSection &&
+   codeText.trim()) state.blocks.push(...)`.
+2. **Captions (and the alt-note under them) completely dropped on
+   import, even though the image itself and its `alt` attribute survived
+   fine.** Confirmed directly: the draft's `figcaption` elements all
+   showed Medium's own placeholder text ("Type caption for image
+   (optional)"), i.e. empty, even though the article's own stored
+   `importData.postHTML` (visible in the page's embedded JSON) clearly
+   contained the real caption text in a `<figcaption>`. Medium's importer
+   silently drops the caption text specifically when it's nested inside a
+   `<figcaption>` inside a `<figure>` — matching the exact pattern already
+   seen twice this session (it also refused `data:`-URI images and bare
+   `<pre>` without `<code>`): it wants flatter, more conventional
+   article-body markup, not semantically-nested structures it has to
+   unpack. Fixed by changing `slotFigure()` in `app.js` to build a
+   `<figure>` containing *only* the `<img>`, with the caption (plus the
+   `.alt-note` span) moved to a plain sibling `<p class="img-caption">`
+   immediately after the figure — no `<figcaption>` anywhere in the
+   compiled output anymore. Updated both stylesheets (`style.css`'s
+   `#preview` rules and `exportHTML()`'s embedded CSS) from `figcaption`
+   selectors to `.img-caption`, and updated Resume's caption-based image-
+   recovery logic (`resumeArticle()`) to look for the caption in the
+   figure's `nextElementSibling` instead of a nested `figcaption`.
+   **Not yet re-verified against a fresh Medium import** — needs the user
+   to publish again and re-check that captions now survive.
 
 ## 6. History note: the parallel-build mistake
 
@@ -560,13 +602,44 @@ what the assistant will perform) or leave it archived/private.
   future publishes, it doesn't retroactively repair what's already in
   Blob storage. If old articles matter, they need to be re-published
   (Resume → Compile → Publish again) to pick up real hosted image URLs.
-- [ ] Confirm the §5 image-hosting + code-block fixes actually work by
-  publishing something fresh and importing it into Medium for real — not
-  yet done. **Specifically check whether the article now comes through in
-  full** (the truncation theory needs this exact test to confirm or rule
-  out) — if it still cuts off at the same point, capture where exactly and
-  what content sits right before the cutoff, since that pinpoints the real
-  cause.
+- [x] Confirm the §5 image-hosting + code-block fixes actually work — user
+  pasted the actual rendered Medium draft DOM after a real import on
+  2026-08-02: images and code blocks (including an ASCII-art block) came
+  through completely and correctly, and the article was **not** truncated
+  — the truncation theory is confirmed resolved as a side effect of the
+  images/code-block fixes.
+- [ ] Confirm the same-day caption fix (§5, moving captions to a sibling
+  `<p class="img-caption">` instead of a nested `<figcaption>`) actually
+  survives a real Medium import — not yet tested against a fresh publish,
+  only code-reviewed and syntax-checked.
+- [ ] **Chrome extension direction, raised by user 2026-08-02, not yet
+  decided or built.** Idea: instead of (or in addition to) publishing an
+  HTML doc and pasting its link into Medium's "Import a story" tool, build
+  a browser extension whose content script runs directly on Medium's own
+  new-story/edit page (confirmed to be a `contenteditable` surface, e.g.
+  `<div id="editor_7" contenteditable="true">`) and drives the compose
+  flow there directly — user pastes the same raw article text once, the
+  extension does the same marker-parsing this app already does, then
+  either (a) directly manipulates the editor's DOM, which is risky since
+  Medium's editor keeps its own internal model in sync with the DOM and
+  raw node insertion could easily desync or get silently reverted, or (b)
+  synthesizes a `paste` event with a `DataTransfer`/`ClipboardEvent`
+  carrying `text/html` (plus real image blobs, not `data:` URIs, in the
+  same clipboard payload) and dispatches it at the contenteditable body,
+  letting *Medium's own* paste handler — the same one that already
+  correctly ingests pasted Word/Google-Docs content and manually
+  clipboard-pasted images — do the ingestion. Option (b) is the safer bet
+  and is plausibly **more reliable than the current Import-a-story path**,
+  since every bug chased this session (dropped images, missing code
+  blocks, dropped captions) came from limitations specific to Medium's
+  *async story-importer*, a different, stricter code path than its live
+  in-editor paste handler. Trade-off: meaningfully more build/maintenance
+  surface (extension packaging + permissions, and it's coupled to
+  Medium's internal DOM/class names, which can change without notice,
+  vs. today's approach which only depends on the stable, documented
+  Import-a-story entry point). Not started — needs an explicit decision
+  from the user on whether the added reliability is worth that trade-off
+  before any implementation begins.
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
   private, or delete it themselves) — this repo doesn't exist anymore as of
   this writing (user deleted it), so this item is effectively resolved,
