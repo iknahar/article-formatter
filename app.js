@@ -354,33 +354,94 @@ const slugify = () =>
 
 // One click, fully automatic: posts the compiled HTML to /api/publish (a Vercel serverless
 // function backed by Vercel Blob storage). The endpoint uploads it, gets a real public URL back
-// immediately, and enforces a rolling window — only the MAX_ARTICLES most recent stay live, older
-// ones are deleted automatically. Requires this app to be deployed on Vercel with a Blob store
-// connected (a static host like GitHub Pages has no serverless runtime, so /api/publish 404s
-// there — see README).
-$("publish").addEventListener("click", async () => {
+// immediately, and — for a real publish, not a draft — enforces a rolling window (MAX_ARTICLES
+// most recent stay live, older ones deleted automatically). Requires this app to be deployed on
+// Vercel with a Blob store connected (a static host like GitHub Pages has no serverless runtime,
+// so /api/publish 404s there — see README).
+async function publishArticle(isDraft) {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
-  res.textContent = "Publishing…";
+  res.textContent = isDraft ? "Saving draft…" : "Publishing…";
   try {
     const html = exportHTML();
     const r = await fetch("/api/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: slugify(), html }),
+      body: JSON.stringify({ slug: slugify(), html, draft: isDraft }),
     });
     let data;
     try { data = await r.json(); } catch { data = { error: `Server said ${r.status} ${r.statusText}` }; }
     if (!r.ok) throw new Error(data.error || r.statusText);
-    res.innerHTML = `<b>Published.</b> Copy this link and use it wherever you need to import the story.<br>
+    const label = isDraft ? "Draft saved." : "Published.";
+    const note = isDraft
+      ? "Drafts aren't limited or auto-deleted — find it any time in Manage articles below."
+      : `Keeping your ${data.kept} most recent article${data.kept === 1 ? "" : "s"} live` +
+        (data.deleted ? `, removed ${data.deleted} older one${data.deleted === 1 ? "" : "s"}` : "") + ".";
+    res.innerHTML = `<b>${label}</b> Copy this link and use it wherever you need to import the story.<br>
       <a href="${data.url}" target="_blank" rel="noopener">${data.url}</a>
       <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
-      <br><small>Keeping your ${data.kept} most recent article${data.kept === 1 ? "" : "s"} live
-      ${data.deleted ? `, removed ${data.deleted} older one${data.deleted === 1 ? "" : "s"}` : ""}.</small>`;
+      <br><small>${note}</small>`;
     $("copy-link").onclick = () => navigator.clipboard.writeText(data.url);
+    refreshArticleList();
   } catch (err) {
     res.classList.add("error");
-    res.innerHTML = `<b>Publish failed.</b> ${esc(err.message)}<br>
+    res.innerHTML = `<b>${isDraft ? "Save draft" : "Publish"} failed.</b> ${esc(err.message)}<br>
       Make sure this app is deployed on Vercel with a Blob store connected (README has the steps).`;
   }
-});
+}
+$("publish").addEventListener("click", () => publishArticle(false));
+$("save-draft").addEventListener("click", () => publishArticle(true));
+
+// ---------- manage articles: list / view / delete everything stored ----------
+async function refreshArticleList() {
+  const box = $("article-list");
+  box.innerHTML = `<p class="lead">Loading…</p>`;
+  try {
+    const r = await fetch("/api/articles");
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    if (!data.items.length) {
+      box.innerHTML = `<p class="lead">Nothing published or saved yet.</p>`;
+      return;
+    }
+    box.innerHTML = "";
+    data.items.forEach((item) => box.appendChild(articleRow(item)));
+  } catch (err) {
+    box.innerHTML = `<p class="lead" style="color:var(--bad)">Couldn't load the list: ${esc(err.message)}</p>`;
+  }
+}
+
+function articleRow(item) {
+  const row = document.createElement("div");
+  row.className = "article-row";
+  const name = item.pathname.split("/").pop();
+  const when = new Date(item.uploadedAt).toLocaleString();
+  const pill = item.kind === "draft" ? '<span class="tag ext">draft</span>' : '<span class="tag ai">published</span>';
+  row.innerHTML = `
+    <div class="article-info">
+      <div><b>${esc(name)}</b> ${pill}</div>
+      <div class="meta">${esc(when)}</div>
+    </div>
+    <div class="article-actions">
+      <a href="${item.url}" target="_blank" rel="noopener" class="copy">View</a>
+      <button class="copy delete-btn">Delete</button>
+    </div>`;
+  row.querySelector(".delete-btn").addEventListener("click", async () => {
+    if (!confirm(`Delete ${name}? This can't be undone.`)) return;
+    try {
+      const r = await fetch("/api/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pathname: item.pathname }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      row.remove();
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
+  });
+  return row;
+}
+$("refresh-articles").addEventListener("click", refreshArticleList);
+refreshArticleList();

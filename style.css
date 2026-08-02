@@ -94,4 +94,14 @@ button{cursor:pointer; font-family:inherit}
   border-radius:12px; padding:18px 20px; font-size:14.5px; line-height:1.6}
 .publish-result.error{border-color:var(--bad); background:rgba(217,92,80,.07)}
 .publish-result a{color:var(--accent); font-weight:700; word-break:break-all}
+.ghost{background:transparent; border:1.5px solid var(--rule); border-radius:10px;
+  padding:10px 18px; font-size:14px; font-weight:600; color:var(--muted)}
+.ghost:hover{border-color:var(--accent); color:var(--accent)}
+.article-list{margin-top:18px; display:grid; gap:10px}
+.article-row{display:flex; align-items:center; justify-content:space-between; gap:16px;
+  border:1px solid var(--rule); border-radius:12px; padding:14px 16px; background:#fcfcfa}
+.article-info b{font-size:14px}
+.article-info .meta{font-size:12px; color:var(--muted); margin-top:3px}
+.article-actions{display:flex; gap:8px; flex-shrink:0}
+.article-actions a.copy{text-decoration:none}
 .foot{text-align:center; color:var(--muted); font-size:12.5px; padding:26px}

@@ -77,12 +77,23 @@
       <article id="preview" contenteditable="true" spellcheck="false"></article>
     </div>
     <p class="lead">One click, fully automatic — Publish uploads the article and hands you back a
-      live link right away. Only your 5 most recent articles stay published; older ones are
-      removed automatically.</p>
+      live link right away. Only your 20 most recent published articles stay live; older ones are
+      removed automatically. Save as Draft instead to keep working on it later — drafts are never
+      limited or auto-deleted.</p>
     <div class="publish-row">
       <button class="next big" id="publish">Publish · get shareable link</button>
+      <button class="next" id="save-draft">Save as draft</button>
     </div>
     <div id="publish-result" class="publish-result hidden"></div>
+  </section>
+
+  <!-- MANAGE ARTICLES -->
+  <section class="step" id="step-manage">
+    <div class="step-head"><h2>Manage articles</h2></div>
+    <p class="lead">Everything you've published or saved as a draft. Delete removes it
+      permanently from storage.</p>
+    <button class="ghost" id="refresh-articles">Refresh</button>
+    <div id="article-list" class="article-list"></div>
   </section>
 </main>
 

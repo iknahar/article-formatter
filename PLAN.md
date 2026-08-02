@@ -97,24 +97,52 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
   (newer style — the label itself is discarded, only what follows is used
   as the prompt).
 
-## 3. Publishing
+## 3. Publishing, drafts, and article management
 
-**Vercel Blob, fully automatic, rolling 5-article window.** (Current design,
-2026-08-02 — the third iteration of this feature; see the history below.)
-`POST /api/publish` (a Vercel serverless function, `api/publish.js`):
+**Vercel Blob, fully automatic, rolling 20-article window, plus drafts and a
+management panel.** (Current design, 2026-08-02.) `POST /api/publish`
+(`api/publish.js`) takes `{ slug, html, draft }`:
 
 1. Uploads the compiled HTML to Vercel Blob storage (`put()`, **private**
    access — see the bug/fix below for why, random suffix so slugs never
-   collide).
-2. Lists all blobs under `articles/` (`list()`), sorts newest-first.
-3. Deletes (`del()`) everything beyond the `MAX_ARTICLES`-most-recent
-   (default 5, overridable via a `MAX_ARTICLES` env var on the Vercel
-   project — no code change needed to tune it).
-4. Returns a link through this app's own `/api/view?pathname=...` route
+   collide) under `articles/<slug>-<id>.html` normally, or
+   `drafts/<slug>-<id>.html` when `draft: true`.
+2. **Published articles only:** lists all blobs under `articles/` (`list()`),
+   sorts newest-first, deletes (`del()`) everything beyond
+   `MAX_ARTICLES`-most-recent (default 20, overridable via a `MAX_ARTICLES`
+   env var — no code change needed to tune it). **Drafts are exempt from
+   this window entirely** — saving a draft never triggers eviction, of
+   drafts or of published articles.
+3. Returns a link through this app's own `/api/view?pathname=...` route
    (`api/view.js`) — not the raw blob URL, which isn't directly fetchable on
-   a private store — plus how many are being kept/were just deleted,
-   straight back to the browser in the same request. One click, no
-   polling, no manual hand-off.
+   a private store — plus how many published articles are being kept/were
+   just deleted (`null`/`0` for drafts), straight back to the browser in the
+   same request. One click, no polling, no manual hand-off.
+
+`GET /api/articles` (`api/articles.js`) lists everything under both
+`articles/` and `drafts/`, merged and sorted newest-first, each tagged
+`kind: "published"` or `"draft"`, with a ready-to-use `/api/view` link.
+`DELETE /api/delete` (`api/delete.js`, body `{ pathname }`) removes one blob
+by pathname — used by the Manage panel's Delete button on any item,
+published or draft.
+
+**The "Manage articles" section** (bottom of `index.html`, always visible,
+not gated behind wizard progress) calls `GET /api/articles` on load and
+after every publish/save, renders each as a row (name, published/draft
+pill, timestamp, View link, Delete button), and calls `DELETE /api/delete`
+with a `confirm()` prompt before removing a row.
+
+**Real limitation, stated plainly (see also README):** Blob storage only
+ever holds the *compiled* HTML output — never the wizard's raw editable
+inputs (title, subtitle, pasted body text, matched diagram files, pasted
+AI/external images). So there is no "Update" in the true CRUD sense — no
+way to reopen a stored article back into the wizard and re-edit it. What
+exists today is Create (Publish/Save as draft), Read (the list + View
+link), and Delete. If true in-place editing is wanted later, it needs a
+new, separate feature: persisting the wizard's `state` object (not just the
+final HTML) as its own JSON blob, and a "load a saved draft back into the
+wizard" flow to consume it. Not built — flag this explicitly if asked for
+"Update" again, don't assume delete+republish silently satisfies it.
 
 **Bug found and fixed (2026-08-02, same day):** first real Publish attempt
 after connecting the Blob store failed with `No token found. Either

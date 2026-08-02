@@ -15,12 +15,20 @@ A small wizard that assembles a publish-ready article:
 7. Press **Compile**
 8. Review the **editable preview** (captions and alt tags included)
 9. Press **Publish** — one click, fully automatic. Uploads the article and hands back a live
-   public link immediately. No token, no manual hand-off step
+   public link immediately. No token, no manual hand-off step. Or press **Save as draft**
+   instead to store it without publishing — drafts aren't limited or auto-deleted
 10. Paste that link into your publishing platform's story-import tool
 
-Only your **5 most recent** published articles stay live — publishing a new one automatically
+Only your **20 most recent** published articles stay live — publishing a new one automatically
 deletes the oldest beyond that, so there's nothing to clean up by hand. Change the limit with a
-`MAX_ARTICLES` environment variable on the Vercel project if you want a different number.
+`MAX_ARTICLES` environment variable on the Vercel project if you want a different number. Drafts
+are exempt from this limit entirely.
+
+**Manage articles** (bottom of the page): lists everything you've published or saved as a draft,
+with a **View** link and a **Delete** button for each. Note the one real limitation — only the
+*compiled* HTML is stored, not your original title/subtitle/pasted body/images, so there's no
+"reopen and re-edit" here. Delete removes it for good; to publish an updated version, redo the
+wizard and delete the old entry from the list yourself if you don't want both around.
 
 ## Deploy on Vercel (required for Publish to work)
 
@@ -35,7 +43,7 @@ that only runs on Vercel, not on a static host like GitHub Pages.
    app's own `/api/view` route (`https://<your-deployment>/api/view?pathname=...`), which
    authenticates to Blob on the server and streams the content back — anyone with that link,
    including Medium's story importer, can open it, even though the underlying store is private.
-   The 5-link rolling window is enforced automatically on every publish
+   The 20-link rolling window is enforced automatically on every publish
 
 **Why Private, not Public?** A Public Blob store's URLs are directly, publicly fetchable —
 simpler, but this project intentionally uses Private plus the `/api/view` proxy above so the
