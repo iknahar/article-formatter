@@ -320,37 +320,61 @@
     await fillCaptions(src.captions);
   }
 
-  // Drive Medium's alt-text dialog for one figure.
+  // Drive Medium's alt-text dialog for one figure. Retries up to 3 times because the failure
+  // observed in a real run (18/23 succeeded, 6 failed at the article's tail) was a scroll+mount
+  // race: images near the end of a long article take longer to have their highlight menu appear,
+  // Medium's editor is lazily attaching it as the viewport nears the bottom. Longer timeouts and
+  // a settle after scroll addresses those without slowing down the happy path noticeably.
   async function setAlt(figure, altText) {
     const img = figure.querySelector("img.graf-image") || figure.querySelector("img");
     if (!img) return false;
-    img.scrollIntoView({ block: "center" });
-    await sleep(150);
-    fireMouse(img, "mousedown"); fireMouse(img, "mouseup"); fireMouse(img, "click");
 
-    const altBtn = await waitFor(
-      () => [...document.querySelectorAll('.highlightMenu [data-action="alt"]')].find(visible),
-      2500
-    );
-    if (!altBtn) { log("Alt button didn't appear for one image — skipped.", "warn"); return false; }
-    altBtn.click();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // Scroll a bit above center so there's room below for Medium's highlight menu, which
+      // appears above the image. On the very last images "center" leaves no room below and the
+      // menu can end up clipped off-screen or fail to mount at all.
+      img.scrollIntoView({ block: "center" });
+      await sleep(attempt === 1 ? 250 : 500); // longer settle on retries
+      fireMouse(img, "mousedown"); fireMouse(img, "mouseup"); fireMouse(img, "click");
 
-    const editable = await waitFor(
-      () => document.querySelector('.editAltTextDialog [contenteditable="true"]'),
-      2500
-    );
-    if (!editable) { log("Alt dialog didn't open — skipped one image.", "warn"); return false; }
-    editable.focus();
-    // Clear whatever's there (placeholder or old value), then type the alt text.
-    document.execCommand("selectAll", false, null);
-    document.execCommand("insertText", false, altText);
+      const altBtn = await waitFor(
+        () => [...document.querySelectorAll('.highlightMenu [data-action="alt"]')].find(visible),
+        attempt === 1 ? 3500 : 5000
+      );
+      if (!altBtn) {
+        if (attempt < 3) {
+          // Deselect anything before trying again — a stale highlight menu can block the next click.
+          document.body.click();
+          await sleep(300);
+          continue;
+        }
+        log(`Alt button didn't appear after ${attempt} attempts — skipping this image.`, "warn");
+        return false;
+      }
+      altBtn.click();
 
-    const saveBtn = document.querySelector('.overlay-actions [data-action="overlay-submit"]')
-      || [...document.querySelectorAll(".overlay-actions button")].find((b) => /save/i.test(b.textContent));
-    if (!saveBtn) { log("Couldn't find the alt dialog's Save button — skipped.", "warn"); return false; }
-    saveBtn.click();
-    await waitFor(() => !document.querySelector(".editAltTextDialog"), 2500);
-    return true;
+      const editable = await waitFor(
+        () => document.querySelector('.editAltTextDialog [contenteditable="true"]'),
+        3500
+      );
+      if (!editable) {
+        if (attempt < 3) { document.body.click(); await sleep(300); continue; }
+        log("Alt dialog didn't open — skipping this image.", "warn");
+        return false;
+      }
+      editable.focus();
+      // Clear whatever's there (placeholder or old value), then type the alt text.
+      document.execCommand("selectAll", false, null);
+      document.execCommand("insertText", false, altText);
+
+      const saveBtn = document.querySelector('.overlay-actions [data-action="overlay-submit"]')
+        || [...document.querySelectorAll(".overlay-actions button")].find((b) => /save/i.test(b.textContent));
+      if (!saveBtn) { log("Couldn't find the alt dialog's Save button — skipped.", "warn"); return false; }
+      saveBtn.click();
+      await waitFor(() => !document.querySelector(".editAltTextDialog"), 2500);
+      return true;
+    }
+    return false;
   }
 
   async function fillAlts(alts) {
@@ -387,6 +411,21 @@
   async function insertArticle(src) {
     const ed = findEditor();
     if (!ed) { log("Couldn't find the Medium editor on this page.", "err"); return "editor not found"; }
+    // Guard against double-inserting: if the draft already has significant content, don't silently
+    // paste another copy on top of it (the user's log showed "Editor has 40 images" — the article
+    // had been inserted twice because Auto-insert ran after the article was already present).
+    const existingFigs = document.querySelectorAll("figure.graf--figure").length;
+    const existingText = (ed.textContent || "").trim().length;
+    if (existingFigs >= 3 || existingText >= 800) {
+      const proceed = confirm(
+        `This draft already has ${existingFigs} image${existingFigs === 1 ? "" : "s"} and about ${existingText} characters of text. ` +
+        `Inserting again will DUPLICATE the article. Continue anyway?`
+      );
+      if (!proceed) {
+        log("Insert cancelled — draft already has content. Use Fill captions & alt tags instead.", "warn");
+        return "insert cancelled (draft not empty)";
+      }
+    }
     log("Inserting body via a synthetic paste…");
     placeCaretAtEnd(ed);
     const dt = new DataTransfer();
