@@ -15,7 +15,8 @@ A small wizard that assembles a publish-ready article:
    `*Alt →*` lines — the number is optional, diagrams match by filename regardless)
 4. Choose the **diagram folder**, files are matched to markers by filename
 5. For each **AI image**, copy the shown prompt, generate it, click the 3:2 frame and paste from clipboard
-6. For each **external image**, search the shown keyword, copy the image, paste the same way
+6. For each **external image**, search the shown keyword, copy the image, paste the same way. Once
+   an image is placed, a **×** in the corner removes it and reverts the slot back to empty
 7. Press **Compile**
 8. Review the **editable preview** (captions and alt tags included)
 9. Press **Publish** — one click, fully automatic. Uploads the article and hands back a live

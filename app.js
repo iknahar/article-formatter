@@ -251,13 +251,25 @@ function makePasteZone(slot, emptyText) {
   const z = document.createElement("div");
   z.className = "pastezone" + (slot.dataURL ? " filled" : "");
   z.tabIndex = 0;
-  z.innerHTML = slot.dataURL
-    ? `<img src="${slot.dataURL}" alt=""><span class="state">Placed ✓ · paste again to replace</span>`
-    : `<span class="state">${esc(emptyText)}</span>`;
+  const render = () => {
+    z.innerHTML = slot.dataURL
+      ? `<img src="${slot.dataURL}" alt=""><span class="state">Placed ✓ · paste again to replace</span>
+         <button type="button" class="remove-img" title="Remove image">×</button>`
+      : `<span class="state">${esc(emptyText)}</span>`;
+    if (slot.dataURL) {
+      z.querySelector(".remove-img").addEventListener("click", (e) => {
+        e.stopPropagation();
+        slot.dataURL = null;
+        z.classList.remove("filled");
+        render();
+      });
+    }
+  };
+  render();
   const set = async (blobOrFile) => {
     slot.dataURL = await compressToDataURL(blobOrFile, 1400, 0.85);
     z.classList.add("filled");
-    z.innerHTML = `<img src="${slot.dataURL}" alt=""><span class="state">Placed ✓ · paste again to replace</span>`;
+    render();
   };
   z.addEventListener("paste", (e) => {
     const item = [...(e.clipboardData?.items || [])].find((it) => it.type.startsWith("image/"));
