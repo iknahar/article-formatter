@@ -103,15 +103,18 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 2026-08-02 — the third iteration of this feature; see the history below.)
 `POST /api/publish` (a Vercel serverless function, `api/publish.js`):
 
-1. Uploads the compiled HTML to Vercel Blob storage (`put()`, public access,
-   random suffix so slugs never collide).
+1. Uploads the compiled HTML to Vercel Blob storage (`put()`, **private**
+   access — see the bug/fix below for why, random suffix so slugs never
+   collide).
 2. Lists all blobs under `articles/` (`list()`), sorts newest-first.
 3. Deletes (`del()`) everything beyond the `MAX_ARTICLES`-most-recent
    (default 5, overridable via a `MAX_ARTICLES` env var on the Vercel
    project — no code change needed to tune it).
-4. Returns the new blob's public URL, plus how many are being kept/were
-   just deleted, straight back to the browser in the same request — one
-   click, no polling, no manual hand-off.
+4. Returns a link through this app's own `/api/view?pathname=...` route
+   (`api/view.js`) — not the raw blob URL, which isn't directly fetchable on
+   a private store — plus how many are being kept/were just deleted,
+   straight back to the browser in the same request. One click, no
+   polling, no manual hand-off.
 
 **Bug found and fixed (2026-08-02, same day):** first real Publish attempt
 after connecting the Blob store failed with `No token found. Either
@@ -130,6 +133,39 @@ throws) automatically once a current-enough SDK version is installed.
 Fix: bumped `package.json` to `@vercel/blob@^2.6.1` (npm's current latest
 as of this date). No changes needed to `api/publish.js` itself. Requires a
 fresh Vercel deploy (which reinstalls dependencies) to take effect.
+
+**Second bug found and fixed (2026-08-02, same day, right after the first):**
+next Publish attempt failed with `Cannot use public access on a private
+store. The store is configured with private access.` The user's Blob store
+had been created with **Private** access (visible in the dashboard
+screenshot), but `api/publish.js` hardcoded `access: "public"` on `put()`.
+Newer Vercel Blob stores enforce one access mode consistently — you cannot
+request the other mode per-call. Checked Vercel's private-storage docs
+directly: **a private blob's own URL is not publicly fetchable at all** —
+reading it requires an `Authorization` header (OIDC or a static
+`BLOB_READ_WRITE_TOKEN`), full stop. Returning `blob.url` as-is to the
+browser would have produced a link nobody (including Medium's importer)
+could actually open.
+
+Two ways to fix this: (a) have the user create a *new* Public store instead,
+or (b) keep the store they already set up and add a thin proxy route that
+authenticates to Blob server-side and re-exposes the content with no auth
+gate of its own. Chose **(b)** — it needed no further dashboard changes from
+the user, who'd already been through two rounds of Blob setup friction that
+same session. Added `api/view.js`: takes `?pathname=...`, calls
+`get(pathname, { access: "private" })` (authenticates via the same OIDC the
+serverless function already has), and streams the result back with
+`Readable.fromWeb(result.stream).pipe(res)` — deliberately with **no**
+auth check of its own, since the entire point is a link anyone can open.
+`api/publish.js` now uploads with `access: "private"` and returns
+`https://<host>/api/view?pathname=<blob.pathname>` (built from the
+incoming request's own `req.headers.host`, not a hardcoded domain) instead
+of the raw blob URL.
+
+**If a future session wants to switch to a Public store instead:** change
+`access: "private"` → `"public"` in both `api/publish.js` and `api/view.js`,
+and have `/api/publish` return `blob.url` directly — `api/view.js` becomes
+unnecessary in that case. Documented in the README too.
 
 **This requires the app itself to be deployed on Vercel**, not just GitHub
 Pages — GitHub Pages is static-only and cannot run `/api/publish` at all.

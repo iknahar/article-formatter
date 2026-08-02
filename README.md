@@ -3,8 +3,12 @@
 A small wizard that assembles a publish-ready article:
 
 1. Enter the **title**
-2. Pick a **subtitle** from the dropdown (or write your own)
-3. Paste the **body copy** (with `**[Place Diagram N → file.png]**`, `**[Place Image N → AI generated, prompt N at the end]**`, and `**[Place Image N → external, search "keyword"]**` markers plus `*Caption →*` / `*Alt →*` lines — the number is optional, diagrams match by filename regardless)
+2. Enter the **subtitle**
+3. Paste the **body copy** — the whole package, SEO suite and all, is fine; parsing
+   automatically starts right after a line reading "the body" or "the article" (with
+   `**[Place Diagram N → file.png]**`, `**[Place Image N → AI generated, prompt N at the end]**`,
+   and `**[Place Image N → external, search "keyword"]**` markers plus `*Caption →*` /
+   `*Alt →*` lines — the number is optional, diagrams match by filename regardless)
 4. Choose the **diagram folder**, files are matched to markers by filename
 5. For each **AI image**, copy the shown prompt, generate it, click the 3:2 frame and paste from clipboard
 6. For each **external image**, search the shown keyword, copy the image, paste the same way
@@ -23,9 +27,22 @@ deletes the oldest beyond that, so there's nothing to clean up by hand. Change t
 Publish needs a real serverless function to upload the article somewhere and hand back a link —
 that only runs on Vercel, not on a static host like GitHub Pages.
 
-1. In [vercel.com](https://vercel.com) → **Add New → Project** → import `iknahar/article-formatter` → Deploy (no build settings needed, it's a static site with one API function)
-2. Enable storage: in the Vercel dashboard → **Storage → Create Database → Blob** → connect it to this project (this injects `BLOB_READ_WRITE_TOKEN` automatically) → **Redeploy**
-3. Done. The Publish button now uploads to Blob storage and returns a public `*.blob.vercel-storage.com` link immediately, with the 5-link rolling window enforced automatically
+1. In [vercel.com](https://vercel.com) → **Add New → Project** → import `iknahar/article-formatter` → Deploy (no build settings needed, it's a static site with two API functions)
+2. Enable storage: in the Vercel dashboard → **Storage → Create Database → Blob** → set access
+   to **Private** → connect it to this project (this injects `BLOB_STORE_ID` and a
+   short-lived, auto-rotating OIDC token — no static secret to copy anywhere) → **Redeploy**
+3. Done. The Publish button uploads to the private store and hands back a link through this
+   app's own `/api/view` route (`https://<your-deployment>/api/view?pathname=...`), which
+   authenticates to Blob on the server and streams the content back — anyone with that link,
+   including Medium's story importer, can open it, even though the underlying store is private.
+   The 5-link rolling window is enforced automatically on every publish
+
+**Why Private, not Public?** A Public Blob store's URLs are directly, publicly fetchable —
+simpler, but this project intentionally uses Private plus the `/api/view` proxy above so the
+underlying storage is never exposed directly and everything is served through code you control.
+If you'd rather use a Public store instead, change both `access: "private"` occurrences in
+`api/publish.js` and `api/view.js` to `"public"`, and `/api/publish` can return `blob.url`
+directly instead of building the `/api/view` link — `view.js` becomes unnecessary in that case.
 
 ## Also on GitHub Pages (static preview only, Publish won't work there)
 

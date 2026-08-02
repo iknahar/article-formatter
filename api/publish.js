@@ -18,8 +18,13 @@ export default async function handler(req, res) {
     }
     const safeSlug = String(slug || "article").replace(/[^a-z0-9-]/gi, "").slice(0, 60) || "article";
 
+    // This project's Blob store is Private (see README) — a private blob's own URL
+    // requires an Authorization header and is not fetchable by anyone else, so we
+    // upload with access: "private" and hand back a link through our own /api/view
+    // route instead (see view.js), which authenticates to Blob server-side and
+    // streams the content back with no auth gate of its own.
     const blob = await put(`articles/${safeSlug}.html`, html, {
-      access: "public",
+      access: "private",
       contentType: "text/html; charset=utf-8",
       addRandomSuffix: true,
     });
@@ -30,8 +35,12 @@ export default async function handler(req, res) {
     const stale = byNewest.slice(MAX_ARTICLES).map((b) => b.url);
     if (stale.length) await del(stale);
 
+    const proto = req.headers["x-forwarded-proto"] || "https";
+    const base = `${proto}://${req.headers.host}`;
+    const publicUrl = `${base}/api/view?pathname=${encodeURIComponent(blob.pathname)}`;
+
     return res.status(200).json({
-      url: blob.url,
+      url: publicUrl,
       kept: Math.min(byNewest.length, MAX_ARTICLES),
       deleted: stale.length,
     });
