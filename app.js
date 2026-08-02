@@ -551,16 +551,18 @@ async function resumeArticle(pathname, skipConfirm) {
 
     // Images live only in the compiled HTML (not the snapshot — see buildSnapshot). Recover them
     // by matching each freshly re-parsed slot's caption text against the published article's own
-    // sibling <p class="img-caption"> elements (captions live as a sibling paragraph after the
-    // <figure>, not nested inside it — see slotFigure); a slot with no matching caption (never
-    // filled originally) is simply left empty, same as it was.
+    // caption element. Current articles carry the caption as a sibling <p class="img-caption">
+    // after the <figure> (see slotFigure); articles published before that change still have it
+    // nested inside a <figcaption> — check both shapes so Resume keeps working on older articles.
     if (compiledHtml) {
       const doc = new DOMParser().parseFromString(compiledHtml, "text/html");
       const captionToSrc = new Map();
       doc.querySelectorAll("figure").forEach((fig) => {
         const img = fig.querySelector("img");
-        const capEl = fig.nextElementSibling;
-        if (!img || !capEl || !capEl.classList.contains("img-caption")) return;
+        if (!img) return;
+        const sib = fig.nextElementSibling;
+        const capEl = sib && sib.classList.contains("img-caption") ? sib : fig.querySelector("figcaption");
+        if (!capEl) return;
         const clone = capEl.cloneNode(true);
         clone.querySelectorAll(".alt-note").forEach((n) => n.remove());
         const capText = clone.textContent.trim();
