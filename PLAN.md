@@ -450,9 +450,14 @@ Search keyword for external-image slots (mirroring the AI slot's existing
 rather than the old single-button `querySelector(".copy")` approach. And
 the **whole card is now clickable** (`wireCardActivatesZone(card)`,
 applied to AI/external slot cards and diagram cards alike) — clicking
-anywhere in a slot card outside a real button forwards the click to its
-paste zone (`zone.click()`), so pasting or picking a file no longer
-requires aiming for the small dashed rectangle specifically.
+anywhere in a slot card outside a real button focuses its paste zone
+(`zone.focus()`, **not** `zone.click()` — fixed the next day after the
+user pointed out the outer-card click was opening the native file picker;
+`.click()` re-triggers the zone's own click handler, which opens the
+picker when empty, but that should only happen from clicking the dashed
+zone itself on purpose), so Ctrl+V paste works without having to aim for
+the small dashed rectangle specifically, without an unwanted file dialog
+popping up from clicking anywhere else on the card.
 
 **Sixth bug, found the next day — a significant one, present since the
 very first publish:** the user imported a published article into Medium

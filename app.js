@@ -239,7 +239,10 @@ function wireCardActivatesZone(card) {
   card.addEventListener("click", (e) => {
     if (e.target.closest("button")) return;
     const zone = card.querySelector(".pastezone");
-    if (zone && !zone.contains(e.target)) zone.click();
+    // .focus() only — NOT .click(). The zone's own click handler opens the native file picker
+    // when empty, which should only happen from clicking the dashed zone itself on purpose, not
+    // from clicking anywhere on the outer card. Focusing is enough to make Ctrl+V paste work.
+    if (zone && !zone.contains(e.target)) zone.focus();
   });
 }
 
