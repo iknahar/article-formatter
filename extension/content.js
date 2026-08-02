@@ -558,12 +558,18 @@
     h.textContent = `Image ${s.num} · ${s.kind === "ai" ? "AI generated" : "external"}`;
     card.appendChild(h);
 
-    // AI: prompt with copy button. External: keyword with copy button.
+    // AI: prompt with copy button. External: keyword with copy button. AI prompts are usually
+    // long and repetitive across the whole article — clamp the display to 2 lines with ellipsis,
+    // put the full text in a native `title` tooltip for hover, and keep the "Copy prompt" button
+    // copying the entire thing regardless of what's visible.
     const promptOrKw = document.createElement("div");
-    promptOrKw.style.cssText = S.slotMeta;
     if (s.kind === "ai") {
       promptOrKw.innerHTML = `<b>Prompt:</b> ${esc(s.prompt || "no prompt found")}`;
+      promptOrKw.style.cssText = S.slotMeta +
+        ";display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden";
+      promptOrKw.title = s.prompt || "";
     } else {
+      promptOrKw.style.cssText = S.slotMeta;
       promptOrKw.innerHTML = `<b>Search:</b> ${esc(s.keyword || s.label)}`;
     }
     card.appendChild(promptOrKw);
