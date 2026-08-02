@@ -65,7 +65,8 @@ $("analyze").addEventListener("click", () => {
 //  **[Place Image 9 → AI generated, prompt 9 at the end]** | [Image 9 · AI generated · ...]
 //  **[Place Image 3 → external, search "keyword"]** | [Image 3 · external · search "kw"]
 //  **[Image 6 → Place Diagram → diagrams/foo.png]** *Caption → ...* *Alt → ...*   (all one line, kind inferred from content, not just the label word)
-const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image)\s+(\d+)\s*(?:→|·|-|—)\s*([^\]]+?)\]\*{0,2}\s*(.*)$/i;
+//  **[Place Diagram → diagrams/foo.png]**   (no number at all — diagrams match by filename anyway, so the number is optional everywhere)
+const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image)\s*(\d+)?\s*(?:→|·|-|—)\s*([^\]]+?)\]\*{0,2}\s*(.*)$/i;
 const CAPTION_RE = /^\*{1,2}Caption\s*→\s*(.+?)\*{1,2}\s*$/i;
 const ALT_RE = /^\*{1,2}Alt\s*→\s*(.+?)\*{1,2}\s*$/i;
 const INLINE_CAP_ALT_RE = /Caption\s*→\s*(.*?)\s*Alt\s*→\s*(.*)$/i;
@@ -75,7 +76,7 @@ const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g,
 function parseBody(raw) {
   state.blocks = []; state.prompts = {}; state.slots = [];
   const lines = raw.replace(/\r/g, "").split("\n");
-  let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false, curPromptKey = null;
+  let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false, curPromptKey = null, autoNum = 0;
 
   const flushPara = () => {
     const text = paraBuf.join(" ").trim();
@@ -120,7 +121,7 @@ function parseBody(raw) {
     const mm = t.match(MARKER_RE);
     if (mm) {
       flushPara();
-      const num = mm[2], payload = mm[3].trim(), restSameLine = stripEmph((mm[4] || "").trim());
+      const num = mm[2] || String(1000 + ++autoNum), payload = mm[3].trim(), restSameLine = stripEmph((mm[4] || "").trim());
       let slot;
       if (/^diagram$/i.test(mm[1]) || /\.(png|jpe?g|webp|avif|gif)\s*$/i.test(payload)) {
         const base = payload.split(/[\\/]/).pop().replace(/\.(png|jpe?g|webp|avif|gif)$/i, "").toLowerCase();
