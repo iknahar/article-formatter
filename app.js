@@ -363,15 +363,27 @@ pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font
 const slugify = () =>
   state.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "article";
 
+// Derive owner/repo from wherever this app is actually being served, so nothing is tied to one
+// account or one repo name — works unmodified for a fork or a rename. Falls back to the known
+// defaults only when there's no usable location (e.g. opened straight from disk via file://).
+function repoInfo() {
+  const host = location.hostname || "";
+  const owner = host.endsWith(".github.io") ? host.slice(0, -".github.io".length) : "iknahar";
+  const seg = location.pathname.split("/").filter(Boolean)[0];
+  const repo = seg || "article-formatter";
+  return { owner, repo };
+}
+
 // No token, no owner/repo fields to fill in. Clicking Publish computes the exact path/URL this
 // article will live at, downloads the HTML file under that same name, and tells the user to hand
 // that file to Claude (already authenticated in the Claude Code session) to actually commit it —
 // the predicted link goes live once that push happens, usually within about a minute for Pages
 // to rebuild.
 $("publish").addEventListener("click", () => {
+  const { owner, repo } = repoInfo();
   const id = Date.now().toString(36);
   const filename = `${slugify()}-${id}.html`;
-  const url = `https://iknahar.github.io/article-formatter/articles/${filename}`;
+  const url = `https://${owner}.github.io/${repo}/articles/${filename}`;
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
   res.innerHTML = `<b>Your link (not live yet):</b><br>

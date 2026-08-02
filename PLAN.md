@@ -93,8 +93,13 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 `Publish` button no longer talks to the GitHub API itself. It:
 
 1. Computes `articles/<slug>-<id>.html` (same slug/id scheme as before).
-2. Shows the resulting `https://iknahar.github.io/article-formatter/articles/...`
-   link immediately, clearly labeled "not live yet."
+2. Shows the resulting link immediately, clearly labeled "not live yet."
+   The owner/repo in that URL are **derived from `location.hostname` /
+   `location.pathname`** at runtime (`repoInfo()` in `app.js`), not
+   hardcoded — a fork or rename produces a correct link with zero code
+   changes. Falls back to `iknahar`/`article-formatter` only when there's
+   no usable location (e.g. opened via `file://`, which isn't the real
+   usage path anyway).
 3. Downloads the compiled HTML under that exact filename.
 
 The user then hands that file to Claude in their chat. Claude (already
