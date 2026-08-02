@@ -433,10 +433,13 @@
     stepHead(area, 1, "Body copy");
     hint(area, "Paste the whole article — SEO suite and all. The IMAGE PROMPTS appendix at the bottom is dropped automatically; everything else goes into your Medium draft.");
 
+    // Textareas can't do CSS text-overflow:ellipsis (they're form controls), but a small rows/
+    // min-height gives the same visual effect: the first ~2 lines are visible and the rest
+    // scrolls internally. The user can drag the corner if they want to see more.
     const ta = document.createElement("textarea");
-    ta.rows = 8;
+    ta.rows = 2;
     ta.value = state.bodyRaw || "";
-    ta.style.cssText = S.input + ";min-height:180px";
+    ta.style.cssText = S.input + ";min-height:44px;max-height:220px";
     ta.placeholder = "Paste here…";
     area.appendChild(ta);
 
