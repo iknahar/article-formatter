@@ -673,34 +673,43 @@ what the assistant will perform) or leave it archived/private.
   `<p class="img-caption">` instead of a nested `<figcaption>`) actually
   survives a real Medium import — not yet tested against a fresh publish,
   only code-reviewed and syntax-checked.
-- [ ] **Chrome extension direction, raised by user 2026-08-02, not yet
-  decided or built.** Idea: instead of (or in addition to) publishing an
-  HTML doc and pasting its link into Medium's "Import a story" tool, build
-  a browser extension whose content script runs directly on Medium's own
-  new-story/edit page (confirmed to be a `contenteditable` surface, e.g.
-  `<div id="editor_7" contenteditable="true">`) and drives the compose
-  flow there directly — user pastes the same raw article text once, the
-  extension does the same marker-parsing this app already does, then
-  either (a) directly manipulates the editor's DOM, which is risky since
-  Medium's editor keeps its own internal model in sync with the DOM and
-  raw node insertion could easily desync or get silently reverted, or (b)
-  synthesizes a `paste` event with a `DataTransfer`/`ClipboardEvent`
-  carrying `text/html` (plus real image blobs, not `data:` URIs, in the
-  same clipboard payload) and dispatches it at the contenteditable body,
-  letting *Medium's own* paste handler — the same one that already
-  correctly ingests pasted Word/Google-Docs content and manually
-  clipboard-pasted images — do the ingestion. Option (b) is the safer bet
-  and is plausibly **more reliable than the current Import-a-story path**,
-  since every bug chased this session (dropped images, missing code
-  blocks, dropped captions) came from limitations specific to Medium's
-  *async story-importer*, a different, stricter code path than its live
-  in-editor paste handler. Trade-off: meaningfully more build/maintenance
-  surface (extension packaging + permissions, and it's coupled to
-  Medium's internal DOM/class names, which can change without notice,
-  vs. today's approach which only depends on the stable, documented
-  Import-a-story entry point). Not started — needs an explicit decision
-  from the user on whether the added reliability is worth that trade-off
-  before any implementation begins.
+- [~] **Chrome extension — decided and a first version built
+  2026-08-02, not yet live-tested.** Lives in `extension/` (MV3:
+  `manifest.json`, `content.js`, `README.md`). Architecture settled after
+  weighing options: the extension **consumes the web app's output, it does
+  NOT re-take the raw marker text.** Reason: the raw article only has image
+  *markers*; the actual image files (AI-generated, external, diagram
+  folder) still have to be assembled and hosted, which the web app already
+  does — rebuilding that inside an extension would just be a second copy of
+  the app. So the user's "same input" is unchanged (assemble in the web app
+  as always, click **Copy for Medium**), and the extension owns only the
+  Medium side.
+
+  What it does: it runs on `medium.com/*`, shows a small bottom-right panel
+  on story-edit pages, and its **Fill alt tags** button reads the same
+  clipboard payload the web app's Copy-for-Medium produced (`<img alt>` per
+  figure), then drives Medium's own alt dialog for each image in order
+  (click image → wait for `.highlightMenu [data-action="alt"]` → click →
+  type into `.editAltTextDialog [contenteditable]` via
+  `execCommand insertText` → click `[data-action="overlay-submit"]`). The
+  body itself is expected to arrive via the user's manual **Ctrl/Cmd+V**
+  (which the user confirmed preserves code blocks, ASCII, and captions —
+  the whole point of the paste path over Import). There's also an
+  experimental **Auto-insert body + alt** button that first tries a
+  synthetic `ClipboardEvent('paste')` with a built `DataTransfer`, waits
+  for Medium's async image uploads to settle, then fills alt — with the
+  manual paste as the documented reliable fallback if the synthetic paste
+  is ignored by Medium's handler in a given browser.
+
+  **Explicitly NOT verified** — no browser+Medium-login environment was
+  available here to test clipboard read, synthetic paste acceptance, image
+  selection, or the alt-dialog timing. Everything is best-effort with
+  on-panel logging so the user can report exactly what didn't appear and
+  the selectors/timing can be corrected. This is a first cut expected to
+  need a live iteration pass. Known simplifications: captions are left as
+  the italic paragraph the paste produces (not moved into Medium's native
+  `figcaption`); alt-matching is by figure order (warns if the editor's
+  image count differs from the clipboard article's).
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
   private, or delete it themselves) — this repo doesn't exist anymore as of
   this writing (user deleted it), so this item is effectively resolved,

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Article Formatter — Medium helper",
+  "version": "0.1.0",
+  "description": "On a Medium draft page, inserts a formatted article and fills every image's alt text — the one thing a paste can't carry on its own.",
+  "permissions": ["clipboardRead"],
+  "host_permissions": ["https://medium.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://medium.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

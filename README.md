@@ -47,6 +47,15 @@ us, so it can't be fixed from the source-HTML side. Medium's paste handler (the 
 ingests Google-Docs/Word paste) does none of it, which is why **Copy for Medium** is the
 recommended path.
 
+### Alt text: the browser extension
+
+A paste carries everything except **alt text** — Medium sets alt through a separate per-image
+dialog a paste can't reach. The [`extension/`](extension/) folder is a small unpacked
+Chrome/Edge extension that closes that gap: after you paste the article into a Medium draft, its
+bottom-right panel's **Fill alt tags** button reads the alt text from the same clipboard payload
+and drives Medium's alt dialog for every image in order. See [extension/README.md](extension/README.md)
+to load it. It's optional — skip it if you don't need alt tags.
+
 Only your **20 most recent** published articles stay live — publishing a new one automatically
 deletes the oldest beyond that, so there's nothing to clean up by hand. Change the limit with a
 `MAX_ARTICLES` environment variable on the Vercel project if you want a different number. Drafts
