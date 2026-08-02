@@ -113,6 +113,24 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
    just deleted, straight back to the browser in the same request — one
    click, no polling, no manual hand-off.
 
+**Bug found and fixed (2026-08-02, same day):** first real Publish attempt
+after connecting the Blob store failed with `No token found. Either
+configure the BLOB_READ_WRITE_TOKEN environment variable, or pass a token
+option.` The user's project env vars showed `BLOB_STORE_ID` and
+`BLOB_WEBHOOK_PUBLIC_KEY` — no `BLOB_READ_WRITE_TOKEN` — because Vercel now
+connects new Blob stores using **OIDC** by default (a short-lived
+`VERCEL_OIDC_TOKEN`, auto-rotated per deployment, paired with
+`BLOB_STORE_ID`), not the older static read-write token. The pinned SDK
+version, `@vercel/blob@^0.27.0`, predates OIDC support and only ever checks
+for `BLOB_READ_WRITE_TOKEN`, so it threw immediately. Confirmed via current
+Vercel docs that `put()`/`list()`/`del()` need **no code changes** for
+OIDC — the SDK resolves credentials in order (explicit `token` option →
+OIDC via `VERCEL_OIDC_TOKEN` + `BLOB_STORE_ID` → `BLOB_READ_WRITE_TOKEN` →
+throws) automatically once a current-enough SDK version is installed.
+Fix: bumped `package.json` to `@vercel/blob@^2.6.1` (npm's current latest
+as of this date). No changes needed to `api/publish.js` itself. Requires a
+fresh Vercel deploy (which reinstalls dependencies) to take effect.
+
 **This requires the app itself to be deployed on Vercel**, not just GitHub
 Pages — GitHub Pages is static-only and cannot run `/api/publish` at all.
 Deployment steps are in the README (`Deploy on Vercel` section): import the
