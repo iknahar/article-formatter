@@ -1,5 +1,9 @@
 # article-formatter
 
+Two pages: **Compose** (`index.html`) is the wizard below. **Manage** (`manage.html`) lists,
+resumes, and deletes everything you've published or saved as a draft — linked from the top nav
+on both pages.
+
 A small wizard that assembles a publish-ready article:
 
 1. Enter the **title**
@@ -24,16 +28,17 @@ deletes the oldest beyond that, so there's nothing to clean up by hand. Change t
 `MAX_ARTICLES` environment variable on the Vercel project if you want a different number. Drafts
 are exempt from this limit entirely.
 
-**Manage articles** (bottom of the page): lists everything you've published or saved as a draft,
-with **View**, **Resume**, and **Delete** for each. **Resume** reloads the wizard with that item's
-original title, subtitle, raw pasted body text, and every image (diagram, AI-generated, and
-external alike) restored exactly as they were — a real editable snapshot is saved alongside the
-compiled HTML every time you Publish or Save as draft, specifically so this works. Edit anything,
-hit Compile again, then Publish or Save as draft again — it overwrites the same entry in place
-(same link, true update) rather than creating a new one, as long as you're saving back to the
-same kind you resumed from (resuming a draft and hitting Publish instead creates a new published
-entry, and vice versa — the old one stays until you delete it yourself). Delete removes an item,
-and its saved snapshot, for good.
+**Manage** (`manage.html`, its own page): stat cards up top (Published / Drafts / Total), then a
+list of everything with **View**, **Resume**, and **Delete** for each. **Resume** takes you back
+to Compose (`index.html?resume=<pathname>` — Manage is a separate page, so this travels as a URL
+rather than a direct DOM call) and reloads that item's original title, subtitle, raw pasted body
+text, and every image (diagram, AI-generated, and external alike) restored exactly as they were —
+a real editable snapshot is saved alongside the compiled HTML every time you Publish or Save as
+draft, specifically so this works. Edit anything, hit Compile again, then Publish or Save as draft
+again — it overwrites the same entry in place (same link, true update) rather than creating a new
+one, as long as you're saving back to the same kind you resumed from (resuming a draft and hitting
+Publish instead creates a new published entry, and vice versa — the old one stays until you delete
+it yourself). Delete removes an item, and its saved snapshot, for good.
 
 ## Deploy on Vercel (required for Publish to work)
 

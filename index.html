@@ -9,10 +9,16 @@
 <body>
 <header class="top">
   <div class="brand"><span class="mark">AF</span> Article Formatter</div>
-  <div class="hint">Title → Subtitle → Body → Diagrams → Images → Compile → Preview → Publish</div>
+  <nav class="pillnav">
+    <a href="index.html" class="pill-tab active">Compose</a>
+    <a href="manage.html" class="pill-tab">Manage</a>
+  </nav>
 </header>
 
 <main>
+  <h1 class="welcome">Let's write one</h1>
+  <p class="welcome-sub">Title → Subtitle → Body → Diagrams → Images → Compile → Preview → Publish</p>
+
   <!-- STEP 1 · TITLE -->
   <section class="step" id="step-title">
     <div class="step-head"><span class="n">1</span><h2>Title</h2></div>
@@ -85,15 +91,8 @@
       <button class="next" id="save-draft">Save as draft</button>
     </div>
     <div id="publish-result" class="publish-result hidden"></div>
-  </section>
-
-  <!-- MANAGE ARTICLES -->
-  <section class="step" id="step-manage">
-    <div class="step-head"><h2>Manage articles</h2></div>
-    <p class="lead">Everything you've published or saved as a draft. Delete removes it
-      permanently from storage.</p>
-    <button class="ghost" id="refresh-articles">Refresh</button>
-    <div id="article-list" class="article-list"></div>
+    <p class="lead" style="margin-top:14px"><a href="manage.html" class="copy">Manage articles →</a>
+      view, resume, or delete anything you've published or saved as a draft.</p>
   </section>
 </main>
 

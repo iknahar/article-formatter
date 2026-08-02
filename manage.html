@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Article Formatter · Manage</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">AF</span> Article Formatter</div>
+  <nav class="pillnav">
+    <a href="index.html" class="pill-tab">Compose</a>
+    <a href="manage.html" class="pill-tab active">Manage</a>
+  </nav>
+</header>
+
+<main>
+  <h1 class="welcome">Your articles</h1>
+  <p class="welcome-sub">Everything you've published or saved as a draft, in one place.</p>
+
+  <div class="stat-row">
+    <div class="stat-card"><div class="stat-num" id="stat-published">–</div><div class="stat-label">Published</div></div>
+    <div class="stat-card"><div class="stat-num" id="stat-draft">–</div><div class="stat-label">Drafts</div></div>
+    <div class="stat-card"><div class="stat-num" id="stat-total">–</div><div class="stat-label">Total</div></div>
+  </div>
+
+  <section class="step">
+    <div class="step-head"><h2>All articles</h2></div>
+    <p class="lead">View opens the live link. Resume reloads everything — title, subtitle, body
+      text, and every image — back into the Compose wizard for editing. Delete removes it, and
+      its saved editable snapshot, permanently.</p>
+    <button class="ghost" id="refresh-articles">Refresh</button>
+    <div id="article-list" class="article-list"></div>
+  </section>
+</main>
+
+<footer class="foot">Published articles live on a rolling 20-item window · drafts are never limited or auto-deleted</footer>
+<script src="manage.js"></script>
+</body>
+</html>

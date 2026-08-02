@@ -7,11 +7,30 @@
 
 ## 1. What this is
 
-A small static web app (`index.html` + `style.css` + `app.js`, no build step,
-no framework, no server required for the core flow) that turns a pasted
+A small static web app (no build step, no framework) that turns a pasted
 article package into a publish-ready page with images/diagrams placed,
 captioned, and alt-tagged — removing the single most tedious manual step in
-the user's writing workflow.
+the user's writing workflow. **Two pages, added 2026-08-02** (originally one
+page with everything on it):
+
+- **Compose** (`index.html` + `app.js`) — the 9-step wizard, §1 below.
+- **Manage** (`manage.html` + `manage.js`) — stat cards (Published / Drafts /
+  Total) plus a list of everything stored, with View / Resume / Delete per
+  item. Split out from the bottom of Compose into its own page when the
+  user asked for a dashboard-style visual redesign (warm cream palette,
+  pill-shaped segmented nav, big rounded cards — see §9) modeled on a
+  reference HR-dashboard screenshot they shared; a management view doesn't
+  belong bolted onto the bottom of a linear wizard once it has its own
+  identity. Both pages share `style.css` and are linked via a `.pillnav` in
+  the header (`Compose` / `Manage` tabs).
+- **Resume across pages**: since Manage can't reach into Compose's DOM
+  directly (separate page loads), its Resume links are plain
+  `index.html?resume=<encoded pathname>` URLs. Compose's `app.js` checks
+  `location.search` for a `resume` param on load
+  (`checkResumeParam()`), calls the same `resumeArticle()` used for
+  same-page resumes (skipping its confirm-dialog, since navigating here
+  already was the confirmation), then cleans the URL with
+  `history.replaceState`.
 
 **The user's real workflow this replaces:** they write articles via a
 separate Claude conversation using a large "master prompt" (voice/humor
@@ -52,10 +71,11 @@ placement/caption/alt-tag step — it does not write the article itself.
 8. **Publish** — one click, fully automatic (see §3 for the full history —
    this went through two other designs earlier the same day before landing
    here). Uploads to Vercel Blob storage via `/api/publish` and gets a live
-   public link back immediately, no token or manual hand-off. Only the 5
+   public link back immediately, no token or manual hand-off. Only the 20
    most recently published articles stay live; publishing a new one deletes
    the oldest automatically. Paste the returned link into your platform's
-   story-import tool.
+   story-import tool. A "Manage articles →" link on this step goes to the
+   Manage page (§1 above).
 
 ## 2. Marker syntax the parser understands
 
@@ -357,3 +377,41 @@ what the assistant will perform) or leave it archived/private.
   real package, load a real diagram folder, paste real images, compile,
   publish, then Resume that same item from Manage articles and confirm
   everything (title/subtitle/body/all images) comes back correctly.
+- [ ] Do one real visual pass of the §9 redesign in an actual browser — it
+  was built from a reference screenshot and code review only, no
+  screenshot-capable environment was available (see §7).
+
+## 9. Visual design system (2026-08-02 redesign)
+
+User shared a screenshot of an HR/dashboard-style product (warm cream
+background, big rounded white cards, black-pill-shaped active nav tab,
+bold stat numbers, clean sans-serif) and asked for that visual language,
+not a literal copy of the HR-specific widgets (employee photos, onboarding
+checklists) — those don't apply to an article-management tool. What
+carried over, in `style.css` (`:root` tokens):
+
+- **Palette**: warm cream `--bg:#f6f0de`, warm off-white cards
+  `--card:#fffdf6`, near-black ink `--ink:#18160f`, warm muted gray
+  `--muted:#8c8570`, golden-yellow accent `--accent:#f5c518` (used for
+  primary actions and progress-y elements — the reference's black-pill
+  "active tab" became `--ink` background, since the accent yellow doing
+  double duty as both "active nav" and "primary button" read as too
+  busy/samey).
+- **Shape**: `.step`/`.stat-card` cards at 22–24px radius (was 16px),
+  pill-shaped (999px radius) buttons/nav tabs/tags throughout (was 6–10px
+  rounded rectangles).
+- **New `.pillnav`/`.pill-tab`** — a segmented capsule nav shared verbatim
+  (same HTML block, same classes) between `index.html` and `manage.html`,
+  with `.active` styled as a solid ink-black pill, mirroring the
+  reference's "Dashboard" active tab treatment.
+- **New `.stat-row`/`.stat-card`/`.stat-num`/`.stat-label`** on the Manage
+  page — big bold numbers (34px/800 weight) over a small muted label,
+  mirroring the reference's "Interviews / Hired / Project time" stat strip.
+  Manage shows Published / Drafts / Total, computed client-side in
+  `manage.js` from the same `/api/articles` response already needed for the
+  list (no new endpoint).
+- All existing functional class names (`.slot`, `.pastezone`, `.tag`,
+  `.hidden`, `.locked`, `.filled`, etc.) were deliberately left unchanged —
+  this was a re-theme (colors/radii/spacing), not a markup/logic rewrite,
+  so `app.js`'s className-toggling continued to work with zero JS changes
+  needed for the visual pass itself.

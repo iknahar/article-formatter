@@ -394,7 +394,7 @@ async function publishArticle(isDraft) {
     resumedPathname = data.pathname || null;
     const label = isDraft ? "Draft saved." : "Published.";
     const note = isDraft
-      ? "Drafts aren't limited or auto-deleted — find it any time in Manage articles below."
+      ? "Drafts aren't limited or auto-deleted — find it any time on the Manage page."
       : `Keeping your ${data.kept} most recent article${data.kept === 1 ? "" : "s"} live` +
         (data.deleted ? `, removed ${data.deleted} older one${data.deleted === 1 ? "" : "s"}` : "") + ".";
     res.innerHTML = `<b>${label}</b> Copy this link and use it wherever you need to import the story.<br>
@@ -402,7 +402,6 @@ async function publishArticle(isDraft) {
       <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
       <br><small>${note}${overwritePathname ? " Updated in place — same link as before." : ""}</small>`;
     $("copy-link").onclick = () => navigator.clipboard.writeText(data.url);
-    refreshArticleList();
   } catch (err) {
     res.classList.add("error");
     res.innerHTML = `<b>${isDraft ? "Save draft" : "Publish"} failed.</b> ${esc(err.message)}<br>
@@ -413,14 +412,18 @@ $("publish").addEventListener("click", () => publishArticle(false));
 $("save-draft").addEventListener("click", () => publishArticle(true));
 
 // ---------- resume: reload a stored item's raw inputs back into the wizard ----------
-async function resumeArticle(item) {
-  if (!confirm("Load this into the wizard? Any unsaved current progress will be replaced.")) return;
+// Called either from the Manage page (via a ?resume=<pathname> link, since Manage is a separate
+// page and can't reach into this page's DOM directly) or in principle from anywhere with a
+// pathname. skipConfirm is true for the query-param case, since navigating here already was the
+// confirmation — there's no "current wizard progress" to protect on a fresh page load.
+async function resumeArticle(pathname, skipConfirm) {
+  if (!skipConfirm && !confirm("Load this into the wizard? Any unsaved current progress will be replaced.")) return;
   try {
-    const r = await fetch(`/api/snapshot?pathname=${encodeURIComponent(item.pathname)}`);
+    const r = await fetch(`/api/snapshot?pathname=${encodeURIComponent(pathname)}`);
     const snap = await r.json();
     if (!r.ok) throw new Error(snap.error || r.statusText);
 
-    resumedPathname = item.pathname;
+    resumedPathname = pathname;
     $("title").value = snap.title || "";
     $("subtitle").value = snap.subtitle || "";
     $("body").value = snap.bodyRaw || "";
@@ -440,58 +443,13 @@ async function resumeArticle(item) {
   }
 }
 
-// ---------- manage articles: list / view / delete everything stored ----------
-async function refreshArticleList() {
-  const box = $("article-list");
-  box.innerHTML = `<p class="lead">Loading…</p>`;
-  try {
-    const r = await fetch("/api/articles");
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    if (!data.items.length) {
-      box.innerHTML = `<p class="lead">Nothing published or saved yet.</p>`;
-      return;
-    }
-    box.innerHTML = "";
-    data.items.forEach((item) => box.appendChild(articleRow(item)));
-  } catch (err) {
-    box.innerHTML = `<p class="lead" style="color:var(--bad)">Couldn't load the list: ${esc(err.message)}</p>`;
+// Arrived via a Resume link from the Manage page (index.html?resume=<encoded pathname>) — load it
+// automatically, then clean the URL so a reload doesn't re-trigger it.
+(function checkResumeParam() {
+  const params = new URLSearchParams(location.search);
+  const pathname = params.get("resume");
+  if (pathname) {
+    resumeArticle(pathname, true);
+    history.replaceState(null, "", location.pathname);
   }
-}
-
-function articleRow(item) {
-  const row = document.createElement("div");
-  row.className = "article-row";
-  const name = item.pathname.split("/").pop();
-  const when = new Date(item.uploadedAt).toLocaleString();
-  const pill = item.kind === "draft" ? '<span class="tag ext">draft</span>' : '<span class="tag ai">published</span>';
-  row.innerHTML = `
-    <div class="article-info">
-      <div><b>${esc(name)}</b> ${pill}</div>
-      <div class="meta">${esc(when)}</div>
-    </div>
-    <div class="article-actions">
-      <a href="${item.url}" target="_blank" rel="noopener" class="copy">View</a>
-      <button class="copy resume-btn">Resume</button>
-      <button class="copy delete-btn">Delete</button>
-    </div>`;
-  row.querySelector(".resume-btn").addEventListener("click", () => resumeArticle(item));
-  row.querySelector(".delete-btn").addEventListener("click", async () => {
-    if (!confirm(`Delete ${name}? This can't be undone.`)) return;
-    try {
-      const r = await fetch("/api/delete", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pathname: item.pathname }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || r.statusText);
-      row.remove();
-    } catch (err) {
-      alert("Delete failed: " + err.message);
-    }
-  });
-  return row;
-}
-$("refresh-articles").addEventListener("click", refreshArticleList);
-refreshArticleList();
+})();
