@@ -512,6 +512,67 @@ consistent with the truncation point falling not too long after the
 article's first image/diagram. If that's right, fixing the images and
 code blocks should also fix the truncation, since the trigger is gone.
 
+**CORRECTION (later same day, from a second, more careful look at the
+rendered Medium editor DOM plus screenshots): the earlier "confirmed
+working" claim just below was over-stated and is partly wrong.** Images
+and text (including full length — the truncation *is* resolved) come
+through, but on close inspection the import is still visibly mangling
+several things, and — critically — the cause is **Medium's Import-a-story
+pipeline itself, not our source HTML.** Proof: the imported Medium page
+embeds `importData.postHTML`, which is the exact HTML Medium fetched from
+us, and in it every code block is a single clean `<pre><code>…</code>
+</pre>`, every heading is immediately followed by its `<p>`, and captions
+are present — yet the rendered editor showed an empty heading injected
+after every heading, an empty code block after every real one, code
+collapsed onto a single line, and broken ASCII art. Those are all added
+*by Medium's importer during ingestion*, so they cannot be fixed by
+cleaning what we generate. The five issues the user reported against the
+import, mapped to cause:
+
+1. Unwanted space after every header → Medium injects an empty `graf--h3
+   graf--empty` heading after each real heading. Import-side.
+2. No caption / no alt on any image → this particular test re-imported the
+   *old* pre-fix article (its `importData.postHTML` still shows nested
+   `<figcaption>`), so the sibling-`<p class="img-caption">` caption fix
+   was never actually exercised here; separately, alt has never survived
+   import. Inconclusive for captions, but import is not to be trusted with
+   them regardless.
+3. Every code block followed by an empty one → Medium injects an empty
+   `graf--pre graf--empty` block after each real code block. Import-side.
+   (NOTE: this is a *different* cause than the parseBody() empty-block bug
+   described in item 1 of the now-superseded list below — that parser bug
+   was real and is fixed, but it is not what produced the doubled blocks
+   in this import; Medium's importer did.)
+4. Code loses newlines, all pasted onto one line → Medium's importer
+   collapses the newlines inside `<pre><code>` (our source has real `\n`
+   characters; screenshot of the source HTML rendered in a plain browser
+   shows correct multi-line). Import-side.
+5. ASCII table broken → same newline/whitespace collapse as #4.
+   Import-side.
+
+**Resolution direction (this is the important part): stop using Import a
+story; paste directly into Medium's editor instead.** Medium's live
+in-editor *paste* handler (the same one that faithfully ingests pasted
+Google-Docs/Word content) does none of the above injection/collapsing.
+Added a **Copy for Medium** button (`copyForMedium()` in `app.js`, primary
+button in the publish row) that hosts every image (reusing
+`hostImagesInline`), then writes the article to the clipboard as
+`text/html` + `text/plain` via `navigator.clipboard.write` +
+`ClipboardItem`; the user opens a new Medium story and presses Ctrl/Cmd+V
+straight into the editor. Captions ride along as a plain `<p><em>…</em>`
+after each figure. **Alt text is the one thing a paste cannot carry**
+(Medium sets alt through a separate dialog), so it is deliberately dropped
+from the paste — that specific gap is the main remaining justification for
+the Chrome-extension route (§8 TODO), which could DOM-drive the alt dialog
+after a paste. **The paste flow is not yet user-verified against a real
+Medium editor** (no browser+Medium-login environment available here to
+test clipboard write + paste behavior); it is the recommended next test.
+If paste still drops or mangles anything, the extension becomes the fix.
+
+--- everything below this line predates the correction above and is kept
+for the record; treat the "verified working" language in it as superseded
+by the mapping above ---
+
 **Confirmed the same day, from the user pasting the actual rendered
 Medium draft DOM after a real import:** images and code blocks (including
 the ASCII-art fridge-box block) now come through completely and correctly

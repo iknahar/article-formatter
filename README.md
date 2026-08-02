@@ -19,13 +19,33 @@ A small wizard that assembles a publish-ready article:
    an image is placed, a **×** in the corner removes it and reverts the slot back to empty
 7. Press **Compile**
 8. Review the **editable preview** (captions and alt tags included)
-9. Press **Publish** — one click, fully automatic. Every image is uploaded to its own real,
-   independently-fetchable link first (needed for step 10 to actually bring images over — a
-   `data:`-embedded image has nothing a story importer can fetch, so it gets silently dropped
-   otherwise), then the article itself is uploaded and you get back a live public link
-   immediately. No token, no manual hand-off step. Or press **Save as draft** instead to store it
-   without publishing — drafts aren't limited or auto-deleted
+9. Press **Copy for Medium** (recommended) — hosts every image, then copies the whole article to
+   your clipboard. Open a **new Medium story** and press **Ctrl/Cmd+V straight into the editor**.
+   This uses Medium's *paste* handler, which is far more faithful than its *Import a story* tool —
+   see "Why paste, not Import" below. (Alt text is the one thing a paste can't carry; Medium sets
+   it in a separate dialog.)
+
+Alternatively, for the link-based import flow:
+
+9b. Press **Publish** — one click, fully automatic. Every image is uploaded to its own real,
+   independently-fetchable link first (a `data:`-embedded image has nothing a story importer can
+   fetch, so it gets silently dropped otherwise), then the article itself is uploaded and you get
+   back a live public link immediately. No token, no manual hand-off step. Or press **Save as
+   draft** instead to store it without publishing — drafts aren't limited or auto-deleted
 10. Paste that link into your publishing platform's story-import tool
+
+### Why paste, not Import
+
+Medium's **"Import a story"** pipeline is a different, stricter code path than its live in-editor
+**paste** handler, and it visibly mangles content *even when the HTML we hand it is clean*. Proven
+against a real import: the imported page embeds `importData.postHTML` (the exact HTML Medium
+fetched from us), and in it every code block is a single clean `<pre><code>`, every heading is
+followed directly by its paragraph, and captions are present — yet the rendered result had an
+empty heading injected after every heading, an empty code block after every real one, code
+collapsed onto one line, and broken ASCII art. All of that is added *by Medium's importer*, not by
+us, so it can't be fixed from the source-HTML side. Medium's paste handler (the same one that
+ingests Google-Docs/Word paste) does none of it, which is why **Copy for Medium** is the
+recommended path.
 
 Only your **20 most recent** published articles stay live — publishing a new one automatically
 deletes the oldest beyond that, so there's nothing to clean up by hand. Change the limit with a

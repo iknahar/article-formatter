@@ -524,6 +524,52 @@ async function publishArticle(isDraft) {
 $("publish").addEventListener("click", () => publishArticle(false));
 $("save-draft").addEventListener("click", () => publishArticle(true));
 
+// Copy the finished article to the clipboard as rich HTML so it can be pasted STRAIGHT into
+// Medium's editor (Ctrl/Cmd+V), bypassing "Import a story" entirely. This exists because Medium's
+// async story-importer — a different, stricter code path than its live in-editor paste handler —
+// demonstrably injects an empty heading after every heading and an empty code block after every
+// real one, collapses code-block newlines onto a single line, and breaks ASCII art, all while the
+// HTML we hand it (visible as importData.postHTML on the imported page) is clean and correct. The
+// paste handler, the same one that faithfully ingests pasted Google-Docs/Word content, does none
+// of that. Images are pre-hosted (same as Publish) so their <img src> is a real URL Medium's paste
+// handler can fetch and re-host; a data: URI would be dropped. Captions ride along as a plain
+// italic paragraph after each figure (how Medium authors caption anyway). Alt text is the one
+// thing a paste can't carry — Medium sets it through a separate dialog — so it's intentionally left
+// off here; that gap is exactly what the DOM-driving browser extension would fill.
+async function copyForMedium() {
+  const res = $("publish-result");
+  res.classList.remove("hidden", "error");
+  res.textContent = "Hosting images…";
+  try {
+    const fullHtml = await hostImagesInline(exportHTML());
+    const doc = new DOMParser().parseFromString(fullHtml, "text/html");
+    const article = doc.querySelector("article");
+    // Caption paragraphs already carry only <em>text</em> (the alt-note span is stripped in
+    // exportHTML). Drop the class so it pastes as an ordinary italic line, nothing Medium-specific.
+    article.querySelectorAll(".img-caption").forEach((p) => p.removeAttribute("class"));
+    const html = article.innerHTML;
+    const text = article.textContent;
+    if (!navigator.clipboard || !window.ClipboardItem) {
+      throw new Error("This browser can't write rich text to the clipboard. Use Publish + Import instead, or try Chrome.");
+    }
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+      }),
+    ]);
+    res.innerHTML = `<b>Copied.</b> Open a <b>new Medium story</b> and press
+      <b>Ctrl/Cmd&nbsp;+&nbsp;V</b> straight into the editor — do <i>not</i> use Import a story.<br>
+      <small>Headings, code blocks, and the ASCII table come through Medium's paste handler intact.
+      Alt text can't travel in a paste (Medium sets it in a separate dialog) — say the word if you
+      want the browser-extension route that fills alt tags too.</small>`;
+  } catch (err) {
+    res.classList.add("error");
+    res.innerHTML = `<b>Copy failed.</b> ${esc(err.message)}`;
+  }
+}
+$("copy-medium").addEventListener("click", copyForMedium);
+
 // ---------- resume: reload a stored item's raw inputs back into the wizard ----------
 // Called either from the Manage page (via a ?resume=<pathname> link, since Manage is a separate
 // page and can't reach into this page's DOM directly) or in principle from anywhere with a

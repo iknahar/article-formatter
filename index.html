@@ -90,9 +90,16 @@
       removed automatically. Save as Draft instead to keep working on it later — drafts are never
       limited or auto-deleted.</p>
     <div class="publish-row">
-      <button class="next big" id="publish">Publish · get shareable link</button>
+      <button class="next big" id="copy-medium">Copy for Medium · paste straight in</button>
+      <button class="next" id="publish">Publish · get shareable link</button>
       <button class="next" id="save-draft">Save as draft</button>
     </div>
+    <p class="lead" style="margin-top:6px"><b>Copy for Medium</b> is the reliable path: it hosts
+      every image, copies the whole article to your clipboard, then you open a new Medium story and
+      press Ctrl/Cmd+V <i>directly into the editor</i>. This uses Medium's paste handler instead of
+      its "Import a story" tool, which is what was injecting empty headings/code blocks, collapsing
+      code onto one line, and breaking the ASCII table. (Publish still works for the link-import
+      flow, but Import mangles those things no matter how clean the source is.)</p>
     <div id="publish-result" class="publish-result hidden"></div>
     <p class="lead" style="margin-top:14px"><a href="manage.html" class="copy">Manage articles →</a>
       view, resume, or delete anything you've published or saved as a draft.</p>
