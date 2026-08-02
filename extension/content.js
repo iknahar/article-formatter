@@ -89,10 +89,13 @@
     const btnAlt = document.createElement("button");
     btnAlt.textContent = "Fill alt tags (needs wizard clipboard)";
     btnAlt.style.cssText = outlineStyle;
+    const btnCap = document.createElement("button");
+    btnCap.textContent = "Fill captions (needs wizard clipboard)";
+    btnCap.style.cssText = outlineStyle;
     const btnAuto = document.createElement("button");
     btnAuto.textContent = "Auto-insert body + alt (beta)";
     btnAuto.style.cssText = outlineStyle;
-    adv.append(advHelp, btnAlt, btnAuto);
+    adv.append(advHelp, btnAlt, btnCap, btnAuto);
 
     logEl = document.createElement("div");
     logEl.style.cssText = [
@@ -118,6 +121,7 @@
       else log("Wizard opened — switch to that tab to assemble your article.", "ok");
     }, btnOpen);
     btnAlt.onclick = () => run(fillAltFlow, btnAlt);
+    btnCap.onclick = () => run(fillCaptionsFlow, btnCap);
     btnAuto.onclick = () => run(autoFlow, btnAuto);
     return wrap;
   }
@@ -186,11 +190,84 @@
       log("Click in this page once, then try again — the browser needs a click first.", "warn");
       return null;
     }
-    if (!html) { log('No HTML on the clipboard. In the web app, click "Copy for Medium" first.', "err"); return null; }
+    if (!html) { log('No HTML on the clipboard. In the wizard, click "Copy for Medium" first.', "err"); return null; }
     const doc = new DOMParser().parseFromString(html, "text/html");
     const figs = [...doc.querySelectorAll("figure")];
     const alts = figs.map((f) => (f.querySelector("img")?.getAttribute("alt") || "").trim());
-    return { bodyHTML: doc.body.innerHTML, text: doc.body.textContent, alts };
+    // Extract each figure's caption text. articleForPaste in wizard.js nests the caption inside a
+    // <figcaption> before the paste; if that shape isn't present (older clipboard, external copy),
+    // fall back to the sibling <p class="img-caption"> that exportHTML emits.
+    const captions = figs.map((f) => {
+      const inFc = f.querySelector("figcaption");
+      if (inFc) return (inFc.textContent || "").trim();
+      const sib = f.nextElementSibling;
+      if (sib && sib.classList && sib.classList.contains("img-caption")) return (sib.textContent || "").trim();
+      return "";
+    });
+    return { bodyHTML: doc.body.innerHTML, text: doc.body.textContent, alts, captions };
+  }
+
+  // Fill Medium's own per-figure caption slot by typing directly into its contenteditable
+  // <figcaption class="imageCaption">. Empty state ships as
+  //   <figure class="graf--figure is-defaultValue">
+  //     …<figcaption><span class="defaultValue">Type caption…</span><br></figcaption>
+  //   </figure>
+  // and turns into plain text after real typing (parent loses "is-defaultValue"). We mirror that
+  // real-typing shape: focus the figcaption, select its contents (placeholder span + <br>), then
+  // execCommand insertText — the same synthetic keystroke path we already use successfully for the
+  // alt-text dialog. A final InputEvent nudge covers editors that watch specifically for it.
+  async function setCaption(figure, captionText) {
+    if (!captionText) return false;
+    const fc = figure.querySelector("figcaption.imageCaption") || figure.querySelector("figcaption");
+    if (!fc) return false;
+    fc.scrollIntoView({ block: "center" });
+    await sleep(80);
+    fc.focus();
+    await sleep(60);
+    const range = document.createRange();
+    range.selectNodeContents(fc);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand("insertText", false, captionText);
+    // Belt & braces: dispatch a real InputEvent in case Medium's model listens for it directly
+    // rather than for execCommand's own synthetic event.
+    try {
+      fc.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: false, data: captionText, inputType: "insertText" }));
+    } catch { /* older browsers: fall through */ }
+    await sleep(50);
+    fc.blur();
+    // Sanity signal for the log: if Medium still marks the figure as default-value, it didn't
+    // pick up our change — report so it's visible without silent-fail.
+    if (figure.classList.contains("is-defaultValue")) {
+      log("Figcaption still shows placeholder — Medium didn't pick up the change on this one.", "warn");
+      return false;
+    }
+    return true;
+  }
+
+  async function fillCaptions(captions) {
+    const figs = [...document.querySelectorAll("figure.graf--figure")];
+    if (!figs.length) { log("No images in the editor yet.", "err"); return; }
+    const n = Math.min(figs.length, captions.length);
+    if (figs.length !== captions.length) {
+      log(`Editor has ${figs.length} images, source article has ${captions.length}. Filling ${n} in order.`, "warn");
+    }
+    let ok = 0;
+    for (let i = 0; i < n; i++) {
+      if (!captions[i]) { log(`Image ${i + 1}: no caption in source, left blank.`); continue; }
+      log(`Image ${i + 1}/${n}: setting caption…`);
+      if (await setCaption(figs[i], captions[i])) ok++;
+      await sleep(120);
+    }
+    log(`Done — set caption on ${ok}/${n} image${n === 1 ? "" : "s"}.`, "ok");
+  }
+
+  async function fillCaptionsFlow() {
+    const src = await getSource();
+    if (!src) return;
+    log(`Clipboard article has ${src.captions.filter(Boolean).length} caption${src.captions.filter(Boolean).length === 1 ? "" : "s"}.`);
+    await fillCaptions(src.captions);
   }
 
   // Drive Medium's alt-text dialog for one figure.
@@ -284,6 +361,10 @@
       return "body did not insert (synthetic paste blocked). Use manual paste + Fill alt tags.";
     }
     await fillAlts(src.alts || []);
+    // Then captions — separate DOM path, per-figure figcaption. See setCaption for why we do this
+    // even though the pasted HTML already carries figcaption text: some Medium builds don't fully
+    // populate the caption slot from the paste, so we finalize it via the same DOM automation.
+    await fillCaptions(src.captions || []);
     return `inserted body; images in editor: ${got}.`;
   }
 

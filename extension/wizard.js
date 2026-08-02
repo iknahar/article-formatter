@@ -629,8 +629,12 @@ async function sendToMedium() {
     const fullHtml = await hostImagesInline(exportHTML());
     const doc = new DOMParser().parseFromString(fullHtml, "text/html");
     const article = articleForPaste(doc.querySelector("article"));
-    const alts = [...article.querySelectorAll("figure img")].map((im) => (im.getAttribute("alt") || "").trim());
-    const payload = { bodyHTML: article.innerHTML, text: article.textContent, alts };
+    // Pass captions alongside alts so the content script can finalize Medium's figcaption slot
+    // per figure via DOM automation, matching the alt-tag path. See content.js setCaption/fillCaptions.
+    const figs = [...article.querySelectorAll("figure")];
+    const alts = figs.map((f) => (f.querySelector("img")?.getAttribute("alt") || "").trim());
+    const captions = figs.map((f) => (f.querySelector("figcaption")?.textContent || "").trim());
+    const payload = { bodyHTML: article.innerHTML, text: article.textContent, alts, captions };
 
     res.textContent = "Sending to your open Medium draft…";
     const reply = await chrome.runtime.sendMessage({ type: "af-send", payload });
