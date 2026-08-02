@@ -13,39 +13,15 @@ const $ = (id) => document.getElementById(id);
 const unlock = (id) => $(id).classList.remove("locked");
 const scrollTo_ = (id) => $(id).scrollIntoView({ behavior: "smooth", block: "start" });
 
-// ---------- step 1 → 2: subtitle suggestions ----------
+// ---------- step 1 → 2: title, subtitle ----------
 document.querySelector('#step-title .next').addEventListener("click", () => {
   state.title = $("title").value.trim();
   if (!state.title) { $("title").focus(); return; }
-  buildSubtitleOptions(state.title);
   unlock("step-subtitle"); scrollTo_("step-subtitle");
 });
 
-function buildSubtitleOptions(title) {
-  const opts = [
-    `${title.replace(/\.$/, "")}, explained the way a friend would explain it`,
-    "A beginner's tour with real stories, diagrams, and working code",
-    "Everything you need to understand it, told like a story",
-    "From zero to genuinely getting it, one diagram at a time",
-    "The plain-English version, with jokes and working Python",
-    "Write my own…",
-  ];
-  const sel = $("subtitle-select");
-  sel.innerHTML = "";
-  opts.forEach((o, i) => {
-    const el = document.createElement("option");
-    el.value = i === opts.length - 1 ? "__custom__" : o;
-    el.textContent = o;
-    sel.appendChild(el);
-  });
-  sel.onchange = () => {
-    $("subtitle-custom").classList.toggle("hidden", sel.value !== "__custom__");
-    if (sel.value === "__custom__") $("subtitle-custom").focus();
-  };
-}
 document.querySelector('#step-subtitle .next').addEventListener("click", () => {
-  const sel = $("subtitle-select");
-  state.subtitle = sel.value === "__custom__" ? $("subtitle-custom").value.trim() : sel.value;
+  state.subtitle = $("subtitle").value.trim();
   unlock("step-body"); scrollTo_("step-body");
 });
 
@@ -73,7 +49,19 @@ const INLINE_CAP_ALT_RE = /Caption\s*→\s*(.*?)\s*Alt\s*→\s*(.*)$/i;
 // unwrap markdown emphasis so brackets/captions read as plain text regardless of ** / * wrapping
 const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
 
+// If the user pastes the whole package (SEO suite, preamble, everything) instead of just the
+// body, find a standalone line reading "the body" or "the article" (any heading level, optional
+// trailing parenthetical, case-insensitive) and start parsing right after it — not on it. That
+// line and everything before it is discarded. No such line found -> the input is used as-is.
+function stripPreamble(raw) {
+  const lines = raw.replace(/\r/g, "").split("\n");
+  const marker = /^#{0,6}\s*\*{0,2}\s*(the body|the article)\s*\*{0,2}\s*(\(.*\))?\s*$/i;
+  const idx = lines.findIndex((l) => marker.test(l.trim()));
+  return idx === -1 ? raw : lines.slice(idx + 1).join("\n");
+}
+
 function parseBody(raw) {
+  raw = stripPreamble(raw);
   state.blocks = []; state.prompts = {}; state.slots = [];
   const lines = raw.replace(/\r/g, "").split("\n");
   let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false, curPromptKey = null, autoNum = 0;

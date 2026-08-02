@@ -24,20 +24,21 @@
   <!-- STEP 2 · SUBTITLE -->
   <section class="step locked" id="step-subtitle">
     <div class="step-head"><span class="n">2</span><h2>Subtitle</h2></div>
-    <p class="lead">Pick a suggested subtitle from the dropdown, or write your own.</p>
-    <select id="subtitle-select"></select>
-    <input type="text" id="subtitle-custom" class="hidden" placeholder="Write your own subtitle" autocomplete="off">
+    <p class="lead">The line shown under the title.</p>
+    <input type="text" id="subtitle" placeholder="A beginner's tour with real stories, diagrams, and working code" autocomplete="off">
     <button class="next" data-goto="step-body">Next · Body copy</button>
   </section>
 
   <!-- STEP 3 · BODY -->
   <section class="step locked" id="step-body">
     <div class="step-head"><span class="n">3</span><h2>Body copy</h2></div>
-    <p class="lead">Paste the full article body. Markers like <code>**[Place Diagram 2 → folder/file.png]**</code>,
+    <p class="lead">Paste the whole thing, SEO suite and all — parsing automatically starts right
+      after a line reading "the body" or "the article", wherever that falls. Markers like
+      <code>**[Place Diagram 2 → folder/file.png]**</code>,
       <code>**[Place Image 9 → AI generated, prompt 9 at the end]**</code> and
-      <code>**[Place Image 3 → external, search "keyword"]**</code> are detected automatically,
-      along with their <code>*Caption →*</code> and <code>*Alt →*</code> lines and the
-      <code>**Prompt N**</code> paragraphs at the end.</p>
+      <code>**[Place Image 3 → external, search "keyword"]**</code> are detected automatically
+      (the number is optional), along with their <code>*Caption →*</code> and <code>*Alt →*</code>
+      lines and the <code>**Prompt N**</code> paragraphs at the end.</p>
     <textarea id="body" rows="14" placeholder="# Heading&#10;&#10;Paragraph text...&#10;&#10;**[Place Diagram 2 → markov-chains-diagrams/d15_pushkin.png]**&#10;*Caption → ...*&#10;*Alt → ...*"></textarea>
     <button class="next" id="analyze">Analyze body · Next</button>
     <div id="analysis" class="analysis hidden"></div>
