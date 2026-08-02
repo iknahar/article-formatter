@@ -111,55 +111,63 @@
   }
 
   // -------- assembly overlay ------------------------------------------------------
-  // Full-viewport-ish overlay that loads the extension's own wizard.html in an iframe. Same code
-  // as the standalone wizard tab, no duplication — the wizard detects the embedded context via
-  // `window.parent !== window` and switches its "send" from chrome.runtime to postMessage to us.
-  // We receive the finished-article payload, tear the overlay down, then run the normal insert
-  // path (paste body -> fill alt -> fill captions) against the visible Medium editor beneath.
+  // Sits where the compact panel lives (bottom-right corner) with the same footprint feel — a
+  // small self-contained pane, no full-viewport backdrop, no context switch. It loads the
+  // extension's own wizard.html in an iframe, so the wizard's step-by-step code (body ->
+  // diagram folder -> AI slots -> external slots -> assemble) runs unchanged. The wizard
+  // detects the embedded context via window.parent and skips its title/subtitle steps.
+  //
+  // While the overlay is open the compact panel hides itself so they don't visually stack, and
+  // shows again when the overlay closes.
   let overlayEl = null;
+  let hiddenPanelEl = null;
   function openAssemblyOverlay() {
-    if (overlayEl) { overlayEl.style.display = "flex"; return; }
-    const shade = document.createElement("div");
-    shade.setAttribute("data-af-overlay", "1");
-    shade.style.cssText = [
-      "position:fixed", "inset:0", "z-index:2147483646", "background:rgba(20,22,28,.55)",
-      "display:flex", "align-items:center", "justify-content:center", "padding:24px",
-      "box-sizing:border-box",
-    ].join(";");
+    if (overlayEl) { overlayEl.style.display = "block"; return; }
+
+    // Hide the compact panel while the overlay is open (same corner, same size range).
+    hiddenPanelEl = document.querySelector('[data-af-panel]');
+    if (hiddenPanelEl) hiddenPanelEl.style.display = "none";
+
     const shell = document.createElement("div");
+    shell.setAttribute("data-af-overlay", "1");
     shell.style.cssText = [
-      "position:relative", "width:min(1180px,96vw)", "height:min(92vh,1100px)",
-      "background:#fffdf9", "border-radius:16px", "overflow:hidden",
-      "box-shadow:0 20px 60px rgba(0,0,0,.35)",
+      "position:fixed", "right:16px", "bottom:16px", "z-index:2147483647",
+      "width:400px", "max-width:calc(100vw - 32px)",
+      "height:min(720px,calc(100vh - 32px))",
+      "background:#fffdf9", "border:1px solid #d9d2bd", "border-radius:14px",
+      "box-shadow:0 10px 30px rgba(0,0,0,.18)", "overflow:hidden",
+      "font-family:system-ui,-apple-system,Segoe UI,sans-serif",
     ].join(";");
+
     const closeBtn = document.createElement("button");
     closeBtn.textContent = "×";
     closeBtn.title = "Close (progress will be lost)";
     closeBtn.style.cssText = [
-      "position:absolute", "top:10px", "right:14px", "z-index:2", "width:32px", "height:32px",
-      "border-radius:16px", "border:none", "background:rgba(255,255,255,.9)",
-      "font-size:20px", "line-height:1", "color:#3a3d46", "cursor:pointer",
-      "box-shadow:0 2px 8px rgba(0,0,0,.15)",
+      "position:absolute", "top:8px", "right:10px", "z-index:2",
+      "width:24px", "height:24px", "border-radius:12px", "border:none",
+      "background:rgba(255,255,255,.9)", "font-size:16px", "line-height:1",
+      "color:#3a3d46", "cursor:pointer", "box-shadow:0 1px 4px rgba(0,0,0,.15)",
     ].join(";");
     closeBtn.onclick = () => {
-      const ok = confirm("Close the assembly overlay? Anything you've filled in will be lost.");
+      const ok = confirm("Close the assembly panel? Anything you've filled in will be lost.");
       if (ok) closeAssemblyOverlay();
     };
+
     const iframe = document.createElement("iframe");
     iframe.src = chrome.runtime.getURL("wizard.html");
     iframe.style.cssText = "width:100%;height:100%;border:0;display:block;background:#fffdf9";
     iframe.setAttribute("data-af-overlay-frame", "1");
+
     shell.append(closeBtn, iframe);
-    shade.appendChild(shell);
-    document.body.appendChild(shade);
-    overlayEl = shade;
-    log("Assembly overlay opened. Fill the article, then click Insert into draft.");
+    document.body.appendChild(shell);
+    overlayEl = shell;
   }
   function closeAssemblyOverlay() {
     if (!overlayEl) return;
     overlayEl.remove();
     overlayEl = null;
-    log("Overlay closed.");
+    if (hiddenPanelEl) { hiddenPanelEl.style.display = ""; hiddenPanelEl = null; }
+    ensurePanel();
   }
 
   // Bridge between the wizard iframe and this content script. The wizard posts to window.parent;

@@ -272,7 +272,10 @@ function renderSlots() {
   state.slots.filter((s) => s.kind === "ext").forEach((s) => ext.appendChild(slotCard(s)));
   $("ai-title").classList.toggle("hidden", !ai.children.length);
   $("ext-title").classList.toggle("hidden", !ext.children.length);
-  unlock("step-images");
+  // Two separate steps now, one per image kind. Unlock both — the user progresses through them via
+  // the Next button between them (step-ai-images → step-ext-images → Assemble).
+  unlock("step-ai-images");
+  unlock("step-ext-images");
 }
 
 function slotCard(s) {
@@ -386,6 +389,10 @@ $("compile").addEventListener("click", () => {
     else if (b.type === "slot") prev.appendChild(slotFigure(b.slot));
   });
   unlock("step-preview"); scrollTo_("step-preview");
+  // In compact/embedded mode the button label is "Assemble article" and there's no preview step —
+  // the user wants one click that compiles + inserts. Trigger the send now that the preview is
+  // built (the DOM we're about to send FROM is $("preview"), which we just populated).
+  if (IS_EMBEDDED) sendToMedium();
 });
 
 function slotFigure(s) {
@@ -681,13 +688,56 @@ async function sendToMedium() {
 }
 $("send-medium")?.addEventListener("click", sendToMedium);
 
-// When running as an overlay iframe on the Medium draft, relabel the primary button so it reads
-// naturally ("Insert into draft" — you're already IN the draft, no "send"). Also mark the body so
-// the panel host can spot us if it needs to.
+// When running as an overlay iframe on the Medium draft, adapt the wizard to the compact,
+// step-by-step flow the user requested:
+//   1. Hide Title + Subtitle steps entirely — Medium's own editor has its title input at the top
+//      of the draft, so a wizard title would just duplicate it. Start straight at Body copy.
+//   2. Relabel the primary button ("Insert into draft" — you're already IN the draft).
+//   3. Mark the body so the panel host can spot us if it needs to.
 if (IS_EMBEDDED) {
-  const btn = $("send-medium");
-  if (btn) btn.textContent = "Insert into draft";
   document.body.dataset.afEmbedded = "1";
+  // Hide steps the compact panel flow doesn't need: title/subtitle (Medium's own editor supplies
+  // them), header/footer chrome, and the preview step (Assemble does compile + insert in one).
+  ["step-title", "step-subtitle", "step-preview"].forEach((id) => {
+    const s = $(id);
+    if (s) s.style.display = "none";
+  });
+  state.title = "";
+  state.subtitle = "";
+  unlock("step-subtitle");
+  unlock("step-body");
+  const sendBtn = $("send-medium");
+  if (sendBtn) sendBtn.textContent = "Insert into draft";
+  const hero = document.querySelector(".welcome");
+  const heroSub = document.querySelector(".welcome-sub");
+  if (hero) hero.style.display = "none";
+  if (heroSub) heroSub.style.display = "none";
+
+  // Show only ONE step at a time — the "current" one. The compact-panel CSS (see wizard.css block
+  // scoped to [data-af-embedded]) hides every .step by default and reveals only .step.current, so
+  // moving between steps is a matter of managing that class. We drive it off two hooks:
+  //   1. Any click that unlocks a new step promotes that step to current.
+  //   2. Any [data-goto] Next button click promotes the goto target to current.
+  // The natural first-visible step is Body copy — unlock() below sets it.
+  const setCurrent = (id) => {
+    document.querySelectorAll(".step").forEach((s) => s.classList.remove("current"));
+    const s = $(id);
+    if (s) s.classList.add("current");
+    // The iframe body scrolls independently; put the visible step at the top.
+    if (s) s.scrollIntoView({ block: "start", behavior: "instant" });
+  };
+  // Intercept every [data-goto] Next so the target becomes the visible step.
+  document.querySelectorAll("[data-goto]").forEach((b) => {
+    b.addEventListener("click", () => setCurrent(b.dataset.goto), true);
+  });
+  // Analyze body → step-diagrams becomes current
+  $("analyze")?.addEventListener("click", () => setCurrent("step-diagrams"), true);
+  // Diagram folder file input change: the wizard auto-advances only when the user hits Next, but
+  // if the user is already looking at step-diagrams that's fine. The Next button above handles it.
+  // renderSlots (fires from Analyze) unlocks step-ai-images/step-ext-images; nothing changes
+  // which one is CURRENT until the user clicks Next.
+  // Start with Body copy visible.
+  setCurrent("step-body");
 }
 
 // ---------- resume: reload a stored item's raw inputs back into the wizard ----------
@@ -743,8 +793,8 @@ async function resumeArticle(pathname, skipConfirm) {
     renderAnalysis();
     renderSlots();
     renderDiagramStatus();
-    ["step-subtitle", "step-body", "step-diagrams", "step-images", "step-preview"].forEach(unlock);
-    scrollTo_("step-images");
+    ["step-subtitle", "step-body", "step-diagrams", "step-ai-images", "step-ext-images", "step-preview"].forEach(unlock);
+    scrollTo_("step-ai-images");
   } catch (err) {
     alert("Couldn't resume: " + err.message);
   }

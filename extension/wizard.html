@@ -59,25 +59,32 @@
       <input type="file" id="diagram-folder" webkitdirectory multiple accept="image/*">
     </label>
     <div id="diagram-status" class="slot-grid"></div>
-    <button class="next" data-goto="step-images">Next · Images</button>
+    <button class="next" data-goto="step-ai-images">Next · AI images</button>
   </section>
 
-  <!-- STEP 5+6 · AI + EXTERNAL IMAGES -->
-  <section class="step locked" id="step-images">
-    <div class="step-head"><span class="n">5</span><h2>AI &amp; external images</h2></div>
+  <!-- STEP 5 · AI IMAGES -->
+  <section class="step locked" id="step-ai-images">
+    <div class="step-head"><span class="n">5</span><h2>AI generated images</h2></div>
     <p class="lead">For each AI image, copy the prompt into your generator, then click the 3:2 frame and paste the result
-      (Ctrl+V). External images show the search keyword, find the image, copy it, and paste the same way.
-      Drag &amp; drop or click-to-browse also works.</p>
+      (Ctrl+V). Drag &amp; drop or click-to-browse also works.</p>
     <h3 class="group-title" id="ai-title">AI generated images</h3>
     <div id="ai-slots" class="slot-grid"></div>
-    <h3 class="group-title" id="ext-title">External images</h3>
-    <div id="ext-slots" class="slot-grid"></div>
-    <button class="next big" id="compile">Compile article</button>
+    <button class="next" data-goto="step-ext-images">Next · External images</button>
   </section>
 
-  <!-- STEP 7+8 · PREVIEW -->
+  <!-- STEP 6 · EXTERNAL IMAGES -->
+  <section class="step locked" id="step-ext-images">
+    <div class="step-head"><span class="n">6</span><h2>External images</h2></div>
+    <p class="lead">For each external image, copy the search keyword, find the image, copy it, and paste into its
+      3:2 frame (Ctrl+V). Drag &amp; drop or click-to-browse also works.</p>
+    <h3 class="group-title" id="ext-title">External images</h3>
+    <div id="ext-slots" class="slot-grid"></div>
+    <button class="next big" id="compile">Assemble article</button>
+  </section>
+
+  <!-- STEP 7 · PREVIEW (skipped in embedded mode — Assemble does compile+insert in one shot) -->
   <section class="step locked" id="step-preview">
-    <div class="step-head"><span class="n">6</span><h2>Preview &amp; edit</h2></div>
+    <div class="step-head"><span class="n">7</span><h2>Preview &amp; edit</h2></div>
     <p class="lead">The text below is editable — click into any paragraph and fix what you want.
       Images carry their captions and alt tags. When it's right, insert into your draft.</p>
     <div class="preview-wrap">

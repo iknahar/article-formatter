@@ -132,3 +132,42 @@ button{cursor:pointer; font-family:inherit}
 .article-info .meta{font-size:12px; color:var(--muted); margin-top:3px}
 .article-actions{display:flex; gap:8px; flex-shrink:0}
 .article-actions a.copy{text-decoration:none}
+
+/* ---------- Compact panel / embedded overlay mode ------------------------------------ */
+/* Applied when the wizard runs inside the on-Medium iframe overlay (see content.js
+   openAssemblyOverlay). Hides chrome that doesn't fit a ~400px pane, shrinks paddings,
+   and swaps the "all steps stacked" layout for "one step at a time" driven by the
+   .current class managed in wizard.js when IS_EMBEDDED. */
+[data-af-embedded="1"] header.top,
+[data-af-embedded="1"] footer.foot,
+[data-af-embedded="1"] .welcome,
+[data-af-embedded="1"] .welcome-sub { display: none !important; }
+
+[data-af-embedded="1"] body { background: #fffdf9; }
+[data-af-embedded="1"] main { padding: 12px !important; max-width: none !important; }
+
+[data-af-embedded="1"] .step { display: none; padding: 14px; border-radius: 12px; margin: 0; }
+[data-af-embedded="1"] .step.current { display: block; }
+[data-af-embedded="1"] .step.locked { opacity: 1; pointer-events: auto; }
+
+[data-af-embedded="1"] .step-head { margin-bottom: 8px; }
+[data-af-embedded="1"] .step-head h2 { font-size: 16px; }
+[data-af-embedded="1"] .step-head .n { width: 22px; height: 22px; line-height: 22px; font-size: 12px; }
+[data-af-embedded="1"] .lead { font-size: 12.5px; line-height: 1.45; margin-bottom: 10px; }
+
+[data-af-embedded="1"] textarea,
+[data-af-embedded="1"] input[type="text"] { font-size: 13px; }
+[data-af-embedded="1"] textarea { min-height: 200px; }
+
+/* Slot grid → single column so 3:2 paste zones aren't crammed. */
+[data-af-embedded="1"] .slot-grid { grid-template-columns: 1fr !important; gap: 10px !important; }
+[data-af-embedded="1"] .slot { padding: 10px; border-radius: 10px; }
+[data-af-embedded="1"] .slot h4 { font-size: 13px; }
+[data-af-embedded="1"] .slot .prompt,
+[data-af-embedded="1"] .slot .meta { font-size: 12px; }
+
+[data-af-embedded="1"] .next { font-size: 13px; padding: 8px 14px; }
+[data-af-embedded="1"] .next.big { font-size: 14px; padding: 10px 16px; }
+
+[data-af-embedded="1"] .analysis { font-size: 12px; padding: 8px 10px; }
+[data-af-embedded="1"] .pill { font-size: 11px; padding: 2px 8px; }
