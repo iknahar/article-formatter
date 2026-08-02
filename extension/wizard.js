@@ -62,12 +62,11 @@ const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g,
 // body, find a standalone line reading "the body" or "the article" (any heading level, optional
 // trailing parenthetical, case-insensitive) and start parsing right after it — not on it. That
 // line and everything before it is discarded. No such line found -> the input is used as-is.
-function stripPreamble(raw) {
-  const lines = raw.replace(/\r/g, "").split("\n");
-  const marker = /^#{0,6}\s*\*{0,2}\s*(the body|the article)\s*\*{0,2}\s*(\(.*\))?\s*$/i;
-  const idx = lines.findIndex((l) => marker.test(l.trim()));
-  return idx === -1 ? raw : lines.slice(idx + 1).join("\n");
-}
+// Per user request 2026-08-03: keep the whole pasted body, including the SEO suite (titles,
+// descriptions, tags, cover-image prompt) at the top. Trimming top-content was pre-empting a
+// decision the user prefers to make in Medium themselves. Bottom trimming (IMAGE PROMPTS
+// appendix) still happens inside parseBody() via the skipSection flag.
+function stripPreamble(raw) { return raw; }
 
 function parseBody(raw) {
   raw = stripPreamble(raw);

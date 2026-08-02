@@ -68,12 +68,12 @@
   const INLINE_CAP_ALT_RE = /Caption\s*(?:→|->|:)\s*(.*?)\s*Alt\s*(?:→|->|:)\s*(.*)$/i;
   const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
 
-  function stripPreamble(raw) {
-    const lines = raw.replace(/\r/g, "").split("\n");
-    const marker = /^#{0,6}\s*\*{0,2}\s*(the body|the article)\s*\*{0,2}\s*(\(.*\))?\s*$/i;
-    const idx = lines.findIndex((l) => marker.test(l.trim()));
-    return idx === -1 ? raw : lines.slice(idx + 1).join("\n");
-  }
+  // Per user request 2026-08-03: keep the whole pasted body, including the SEO suite (titles,
+  // descriptions, tags, cover-image prompt) at the top. The user can delete anything they don't
+  // want inside Medium after the paste — trimming here was pre-empting a decision they'd rather
+  // make themselves. Bottom trimming (the IMAGE PROMPTS appendix) still happens inside
+  // parseBody() via the skipSection flag; that's what "trim the bottom not-article part" means.
+  function stripPreamble(raw) { return raw; }
 
   function parseBody(raw) {
     raw = stripPreamble(raw);
@@ -431,7 +431,7 @@
   // ---------- step 1: body copy -----------------------------------------------------
   function renderBodyStep(area) {
     stepHead(area, 1, "Body copy");
-    hint(area, "Paste the whole article (SEO suite is fine — parsing starts after a line reading &quot;the body&quot; or &quot;the article&quot;).");
+    hint(area, "Paste the whole article — SEO suite and all. The IMAGE PROMPTS appendix at the bottom is dropped automatically; everything else goes into your Medium draft.");
 
     const ta = document.createElement("textarea");
     ta.rows = 8;
