@@ -43,12 +43,14 @@ placement/caption/alt-tag step — it does not write the article itself.
 7. **Preview & edit** — the compiled article is `contenteditable`; click
    into any paragraph and fix it. Every image (AI, external, and diagram
    alike) renders with its caption and a small alt-tag note beneath it.
-8. **Publish** — commits the finished HTML to this repo's `articles/`
-   folder via the GitHub Contents API (browser → github.com directly, no
-   backend), returns a `https://iknahar.github.io/article-formatter/articles/...`
-   link once GitHub Pages rebuilds (~1 min). Paste that link into your
-   platform's story-import tool. **Download HTML instead** is the no-token
-   fallback — always works, host the file anywhere.
+8. **Publish** — no token, no owner/repo/branch fields (removed 2026-08-02,
+   see §3). Computes the exact future URL client-side, shows it immediately,
+   and downloads the HTML file under the matching filename. The user hands
+   that file to Claude in their chat, who pushes it to this repo's
+   `articles/` folder using the Claude Code session's own `gh` auth — no
+   credential ever touches the browser. The shown link goes live once that
+   push lands and GitHub Pages rebuilds (~1 min). Paste it into your
+   platform's story-import tool.
 
 ## 2. Marker syntax the parser understands
 
@@ -87,15 +89,34 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 
 ## 3. Publishing
 
-**GitHub Pages only** — no Vercel. `Publish` commits
-`articles/<slug>-<id>.html` straight to this repo via
-`PUT /repos/{owner}/{repo}/contents/{path}` using a fine-grained PAT (repo
-scope: `article-formatter` only, permission: Contents read & write) that the
-user pastes into the browser once; it's kept in `localStorage`, never sent
-anywhere but the GitHub API, and never embedded in the published article.
-GitHub Pages is already enabled on this repo (`Settings → Pages → Deploy
+**GitHub Pages only** — no Vercel, no token in the browser. The app's
+`Publish` button no longer talks to the GitHub API itself. It:
+
+1. Computes `articles/<slug>-<id>.html` (same slug/id scheme as before).
+2. Shows the resulting `https://iknahar.github.io/article-formatter/articles/...`
+   link immediately, clearly labeled "not live yet."
+3. Downloads the compiled HTML under that exact filename.
+
+The user then hands that file to Claude in their chat. Claude (already
+`gh`-authenticated as `iknahar` in the Claude Code session — see §4) commits
+it to `articles/` directly via `gh`/git, no PAT creation or browser-side
+token ever required. This replaced an earlier design where the app itself
+called `PUT /repos/{owner}/{repo}/contents/{path}` with a fine-grained PAT
+the user had to create and paste into `localStorage` — removed 2026-08-02
+because the token-creation step was real friction the user wanted gone, and
+a static client-only app can't write to GitHub without *some* credential
+somewhere, so the credential moved to the Claude Code session instead of the
+browser. GitHub Pages is enabled on this repo (`Settings → Pages → Deploy
 from branch → main / root`), confirmed live at
 `https://iknahar.github.io/article-formatter/`.
+
+**Tradeoff to be upfront about:** this makes Publish a two-step,
+human-in-the-loop process (download → hand to Claude) rather than one click.
+It is not fully automated. If the user wants one-click publishing back, the
+options are: (a) restore the browser-side PAT flow this replaced, or
+(b) stand up a minimal backend that holds a server-side credential — both
+previously discussed and both explicitly declined so far (token friction,
+and "not vercel needed" respectively).
 
 *(A Vercel Blob storage publish path existed earlier in the project and was
 deliberately removed at the user's request — GitHub Pages replaced it

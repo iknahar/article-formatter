@@ -75,21 +75,10 @@
     <div class="preview-wrap">
       <article id="preview" contenteditable="true" spellcheck="false"></article>
     </div>
-    <div class="dest-box">
-      <label class="dest-label">Publish to GitHub Pages</label>
-      <div id="gh-config">
-        <div class="gh-row">
-          <input type="text" id="gh-owner" value="iknahar" placeholder="owner">
-          <input type="text" id="gh-repo" value="article-formatter" placeholder="repo">
-          <input type="text" id="gh-branch" value="main" placeholder="branch">
-        </div>
-        <input type="password" id="gh-token" placeholder="GitHub fine-grained token (contents: read & write on this repo)">
-        <p class="dest-note">The token is kept only in this browser (localStorage), it is never part of the published article.</p>
-      </div>
-    </div>
+    <p class="lead">No token to set up. Publish shows you the exact link this article will live
+      at and downloads the file — send that file to Claude in your chat to push it live.</p>
     <div class="publish-row">
       <button class="next big" id="publish">Publish · get shareable link</button>
-      <button class="ghost" id="download">Download HTML instead</button>
     </div>
     <div id="publish-result" class="publish-result hidden"></div>
   </section>

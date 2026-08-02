@@ -360,69 +360,30 @@ pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font
 <style>${css}</style></head><body><article>${body.innerHTML}</article></body></html>`;
 }
 
-// GitHub Pages token persistence
-$("gh-token").value = localStorage.getItem("gh-token") || "";
-$("gh-token").addEventListener("change", () =>
-  localStorage.setItem("gh-token", $("gh-token").value.trim()));
-
 const slugify = () =>
   state.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "article";
 
-// unicode-safe base64 for the GitHub contents API
-function toBase64(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(bin);
-}
-
-async function publishToGitHub(html) {
-  const owner = $("gh-owner").value.trim(), repo = $("gh-repo").value.trim(),
-        branch = $("gh-branch").value.trim() || "main",
-        token = $("gh-token").value.trim();
-  if (!token) throw new Error("Paste your GitHub token first (see the README for how to create one).");
-  const path = `articles/${slugify()}-${Date.now().toString(36)}.html`;
-  const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ message: `Publish article: ${state.title}`, content: toBase64(html), branch }),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.message || `GitHub said ${r.status}`);
-  return { url: `https://${owner}.github.io/${repo}/${path}`,
-           note: "GitHub Pages takes ~1 minute to rebuild. If the link 404s, wait a moment and refresh before importing." };
-}
-
-$("publish").addEventListener("click", async () => {
+// No token, no owner/repo fields to fill in. Clicking Publish computes the exact path/URL this
+// article will live at, downloads the HTML file under that same name, and tells the user to hand
+// that file to Claude (already authenticated in the Claude Code session) to actually commit it —
+// the predicted link goes live once that push happens, usually within about a minute for Pages
+// to rebuild.
+$("publish").addEventListener("click", () => {
+  const id = Date.now().toString(36);
+  const filename = `${slugify()}-${id}.html`;
+  const url = `https://iknahar.github.io/article-formatter/articles/${filename}`;
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
-  res.textContent = "Publishing…";
-  try {
-    const html = exportHTML();
-    const out = await publishToGitHub(html);
-    res.innerHTML = `<b>Published.</b> Copy this link and use it wherever you need to import the story.<br>
-      <a href="${out.url}" target="_blank" rel="noopener">${out.url}</a>
-      <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
-      ${out.note ? `<br><small>${esc(out.note)}</small>` : ""}`;
-    $("copy-link").onclick = () => navigator.clipboard.writeText(out.url);
-  } catch (err) {
-    res.classList.add("error");
-    res.innerHTML = `<b>Publish failed.</b> ${esc(err.message)}<br>
-      Check the token and that Pages is enabled (README has the steps).
-      Either way <b>Download HTML instead</b> always works.`;
-  }
-});
+  res.innerHTML = `<b>Your link (not live yet):</b><br>
+    <a href="${url}" target="_blank" rel="noopener">${url}</a>
+    <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
+    <br><small>Downloading <code>${esc(filename)}</code> now — send that file to Claude in your
+    chat and this exact link goes live once it's pushed (usually about a minute).</small>`;
+  $("copy-link").onclick = () => navigator.clipboard.writeText(url);
 
-$("download").addEventListener("click", () => {
   const blob = new Blob([exportHTML()], { type: "text/html" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (state.title || "article").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".html";
+  a.download = filename;
   a.click();
 });

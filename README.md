@@ -10,17 +10,19 @@ A small wizard that assembles a publish-ready article:
 6. For each **external image**, search the shown keyword, copy the image, paste the same way
 7. Press **Compile**
 8. Review the **editable preview** (captions and alt tags included)
-9. Press **Publish** to get a public link, then paste it into your publishing platform's story-import tool
+9. Press **Publish** — no token, no setup. It shows the exact link this article will live at
+   (e.g. `https://iknahar.github.io/article-formatter/articles/my-story-mf3k2a.html`) and
+   downloads the HTML file under that same name
+10. Send that downloaded file to Claude in your chat — it pushes it to `articles/` in this repo
+    on your behalf (already authenticated, no token needed from you). The link shown in step 9
+    goes live once that's pushed and GitHub Pages rebuilds (usually about a minute)
+11. Paste that link into your publishing platform's story-import tool
 
 ## Deploy on GitHub Pages (free, unique URLs)
 
-1. In this repo on GitHub go to **Settings → Pages → Build and deployment → Source: Deploy from a branch → `main` / `/ (root)`** → Save
-2. After ~1 minute the app is live at `https://iknahar.github.io/article-formatter/`
-3. Create a token for the Publish button: GitHub → **Settings → Developer settings → Fine-grained personal access tokens → Generate new token**, Repository access = only `article-formatter`, Permissions = **Contents: Read and write**. Copy it.
-4. In the app's publish step, paste the token (it's stored only in your browser), and hit Publish
-5. Each publish commits `articles/<slug>-<id>.html` to the repo and returns a unique link like `https://iknahar.github.io/article-formatter/articles/my-story-mf3k2a.html`, wait ~1 minute for Pages to rebuild, then paste it into your platform's story-import tool
-
-Without a token, everything still works except Publish — use **Download HTML instead** and host the file anywhere public.
+In this repo on GitHub go to **Settings → Pages → Build and deployment → Source: Deploy from a
+branch → `main` / `/ (root)`** → Save. After ~1 minute the app is live at
+`https://iknahar.github.io/article-formatter/`. (Already enabled on this repo.)
 
 ## Local development
 
