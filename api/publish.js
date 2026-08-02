@@ -14,8 +14,17 @@ export default async function handler(req, res) {
     if (!html || typeof html !== "string") {
       return res.status(400).json({ error: "Missing article HTML" });
     }
-    if (html.length > 4_000_000) {
-      return res.status(413).json({ error: "Article is too large (over 4 MB). Use fewer or smaller images." });
+    // Vercel Functions hard-cap the whole request body at 4.5 MB, enforced at the platform level
+    // before this code even runs — a request over that limit never reaches here at all, and the
+    // client just sees a raw, non-JSON 413. This check can't catch *that* case (nothing server-side
+    // can), but it does catch anything close enough to explain clearly rather than let it hit the
+    // platform wall silently. Snapshot is text-only (title/subtitle/body) — see app.js's
+    // buildSnapshot for why images were deliberately removed from it.
+    const approxRequestSize = html.length + (snapshot ? JSON.stringify(snapshot).length : 0);
+    if (approxRequestSize > 4_300_000) {
+      return res.status(413).json({
+        error: "Article is too large for a single request (close to Vercel's 4.5 MB per-request limit). Use fewer or smaller images.",
+      });
     }
     const safeSlug = String(slug || "article").replace(/[^a-z0-9-]/gi, "").slice(0, 60) || "article";
     const prefix = draft ? "drafts" : "articles";

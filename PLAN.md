@@ -106,11 +106,25 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 - `Caption →` / `Alt →` may be on the **same line** as the bracket (common
   when the source article wraps them in italics right after the bracket) or
   on the **following line(s)** — both are handled.
-- **Kind is inferred from the bracket's content**, not just the leading
-  word: a payload containing an image-file extension → `diagram`; containing
-  "AI generated"/"AI-generated" → `ai`; containing "external" → `ext`
-  (search keyword extracted from quotes, or from the text after
-  "external,"); anything else defaults to `ai`.
+- **Kind is inferred from the bracket's content OR its leading word**: a
+  payload containing an image-file extension → `diagram`; a leading word or
+  payload containing "external" → `ext` (one or more quoted search terms
+  extracted and joined with " · or · " if multiple are given — e.g.
+  `[External image → search "term one" and "term two"]`); a payload
+  containing "AI generated"/"AI-generated" → `ai`; anything else defaults to
+  `ai`. The bracket's leading word itself can be `Image`, `Diagram`, or
+  `External`/`External image` — this changed 2026-08-02 (see §5) when a
+  generation used `[External image → ...]` as the whole leading phrase
+  instead of putting "external" inside the payload after `Image N →`.
+- **Extra "Label → text" annotation lines are tolerated**, e.g.
+  `Placement → where to put this image in the article`. The scanner looks
+  for `Caption →`/`Alt →` up to 8 lines ahead, skipping any line that
+  matches the same `Label → text` shape but isn't Caption or Alt, so an
+  unexpected field like `Placement →` doesn't stop the scan before it
+  reaches the real Caption/Alt lines below it. Genuinely unstructured
+  prose (a real paragraph, not a labeled line) still stops the scan
+  immediately, so real article text is never captured or discarded as if
+  it were marker metadata.
 - **Appendix prompts**, under any heading containing "image prompts": either
   `**Prompt N, <text>**` (text inline, legacy style) or `**Image N ·
   <label>**` followed by the real prompt as separate paragraph line(s)
@@ -166,29 +180,41 @@ after every publish/save, renders each as a row (name, published/draft
 pill, timestamp, **View** link, **Resume** button, **Delete** button), and
 calls `DELETE /api/delete` with a `confirm()` prompt before removing a row.
 
-### Resume / true update (added 2026-08-02, same day)
+### Resume / true update (added 2026-08-02, same day; images fixed later same day — see §5)
 
 The user asked directly for this after being told the earlier design only
 supported Create/Read/Delete, not Update, because Blob only stored the
 compiled HTML. Fixed by saving a **raw editable snapshot** alongside every
-publish/draft-save (see §3.2), and adding:
+publish/draft-save (see §3.2):
 
 - **Client (`app.js`) `buildSnapshot()`** — reads live DOM values
   (`$("title").value`, `$("subtitle").value`, `$("body").value`, deliberately
-  *not* the possibly-stale `state.title`/`state.subtitle`) plus every
-  `state.slots[].dataURL` keyed by slot `num`. Since diagrams, AI images,
-  and external images all end up as a plain `dataURL` on their slot
-  regardless of kind once filled, **one snapshot mechanism covers all three
-  image types** — resuming restores diagram images too, no need to
-  re-select the diagram folder at all.
-- **`resumeArticle(item)`** — confirms before discarding unsaved wizard
-  state, fetches the snapshot, restores the title/subtitle/body inputs,
-  calls the existing `parseBody()` to re-derive `state.slots` from the raw
-  body text (same function used by the normal "Analyze" step), then
-  re-attaches each slot's saved `dataURL` by matching `num`, re-renders via
-  the existing `renderAnalysis()`/`renderSlots()`/`renderDiagramStatus()`,
-  unlocks every step through Preview, and scrolls to the images step so the
-  user immediately sees everything came back.
+  *not* the possibly-stale `state.title`/`state.subtitle`). **Text only —
+  deliberately no images.** The first version also serialized every
+  `state.slots[].dataURL` into the snapshot, which duplicated every image a
+  second time in the same request (the compiled `html` already embeds them
+  inline) and caused real "Server said 413" failures on ordinary
+  publishes once articles had a few images — Vercel Functions hard-cap
+  request bodies at 4.5 MB, platform-level, non-configurable. Fixed by
+  removing `images` from the snapshot entirely (see §5's dedicated entry).
+- **`resumeArticle(pathname, skipConfirm)`** — confirms before discarding
+  unsaved wizard state (unless arriving via the cross-page `?resume=` link,
+  see below, where navigating here already was the confirmation), fetches
+  the snapshot **and, in parallel, the already-published compiled HTML**
+  via `/api/view`, restores the title/subtitle/body inputs, calls the
+  existing `parseBody()` to re-derive `state.slots` from the raw body text
+  (same function used by the normal "Analyze" step), then recovers each
+  slot's image by **matching its caption text against the compiled HTML's
+  `<figcaption>` elements** (parsed client-side with `DOMParser`) rather
+  than from the snapshot — since diagrams, AI images, and external images
+  all end up as a plain `dataURL` on their slot regardless of kind once
+  filled, and all render through the same `<figure><img><figcaption>`
+  shape in `exportHTML()`, this one mechanism covers all three image types
+  with no size cost at all (a slot with no matching caption, i.e. never
+  filled originally, is simply left empty). Re-renders via the existing
+  `renderAnalysis()`/`renderSlots()`/`renderDiagramStatus()`, unlocks every
+  step through Preview, and scrolls to the images step so the user
+  immediately sees everything came back.
 - **`resumedPathname`** (module-level in `app.js`) — tracks what's
   currently being edited. `publishArticle()` passes it as
   `overwritePathname` only when its prefix (`articles/` vs `drafts/`)
@@ -197,6 +223,12 @@ publish/draft-save (see §3.2), and adding:
   instead, leaving the original untouched until manually deleted. This is a
   deliberate, simple default rather than a scope/kind-conversion feature —
   documented in the README, not hidden.
+- **Cross-page**: since Manage moved to its own page (`manage.html`, later
+  the same day — see §1 and §9), Resume there is a plain link,
+  `index.html?resume=<encoded pathname>`. Compose's `app.js` checks
+  `location.search` on load (`checkResumeParam()`), calls the same
+  `resumeArticle()` with `skipConfirm: true`, then cleans the URL with
+  `history.replaceState`.
 
 This closes the Update gap from the original design note (now removed —
 Update exists, with the one caveat above about kind-crossing being a fresh
@@ -327,6 +359,55 @@ understands both header styles. **Verified** against the user's actual
 failing article text (isolated the parser into a standalone Node script and
 ran it against the real bracket lines) — all three slot kinds now parse
 correctly with the right file/search-term/caption/alt/prompt.
+
+**Third parser bug, same day, later:** a new marker style,
+`[External image → search "term one" and "term two"]`, wasn't detected at
+all — no diagram/AI/external slot got created for it. Root cause: `External`
+as the bracket's *leading word* (replacing `Image`/`Diagram` entirely) had
+never been anticipated; `MARKER_RE` only accepted `Diagram` or `Image`
+there. Worse, the same real article used `Placement → ...` as an extra
+annotation line instead of going straight to `Caption →`/`Alt →` — the
+Caption/Alt lookahead loop stopped (`break`) on the very first line that
+wasn't literally `Caption →` or `Alt →`, meaning it would have silently
+**discarded** a real paragraph as marker metadata if one had immediately
+followed a slot lacking Caption/Alt on the next line, in addition to just
+failing to see the real Caption/Alt lines two lines further down. Fixed:
+`MARKER_RE` now also accepts `External`/`External image` as the bracket's
+leading word (kind-classification checks `mm[1]` for "external" now, not
+only the payload); external keyword extraction now captures *all* quoted
+phrases via a global match and joins multiple with " · or · " instead of
+only ever taking the first; the Caption/Alt lookahead is now bounded (8
+lines) and **skips** any other `Label → text`-shaped annotation line
+(`ANNOTATION_RE`) instead of stopping on it, while still stopping
+immediately on genuinely unstructured prose so real article paragraphs are
+never eaten. Verified with a standalone Node test using the user's actual
+bracket text plus a plausible Caption/Alt/paragraph continuation — all
+three concerns (kind detection, non-Caption/Alt annotation tolerance,
+paragraph preservation) confirmed working.
+
+**Fourth bug, same day, right after — a real regression, not a parser
+issue:** ordinary Publish and Save as Draft started failing with
+`Server said 413` (no further detail — the plain non-JSON response meant
+Vercel's platform rejected the request before this app's own function code
+ever ran). Root cause: adding the Resume feature's snapshot (see §3's
+Resume subsection) had made `buildSnapshot()` serialize every
+`state.slots[].dataURL` a **second time**, on top of the same images
+already embedded inline in the compiled `html` being uploaded in the same
+request — roughly doubling the request body for any image-heavy article.
+Vercel Functions cap request bodies at 4.5 MB, platform-level, not
+configurable from code — confirmed via Vercel's own docs, which also
+confirm nothing server-side can catch a request that already exceeds the
+limit, since it never reaches function code at all. Fixed by removing
+`images` from the snapshot entirely — it's text-only now
+(title/subtitle/bodyRaw) — and reworking Resume to recover images from the
+already-published compiled HTML by caption-matching instead (see §3's
+Resume subsection for the mechanism). Also tightened `api/publish.js`'s own
+size check to look at `html.length` plus the snapshot's serialized length
+combined (threshold 4.3 MB, leaving headroom under the platform's hard
+4.5 MB) so a request that's merely *close* to the limit gets a clear JSON
+error instead of silently hitting the platform wall — this can't catch
+every case (nothing running inside the function can, by definition), but
+it's strictly better than before.
 
 ## 6. History note: the parallel-build mistake
 

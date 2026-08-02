@@ -42,7 +42,11 @@ $("analyze").addEventListener("click", () => {
 //  **[Place Image 3 → external, search "keyword"]** | [Image 3 · external · search "kw"]
 //  **[Image 6 → Place Diagram → diagrams/foo.png]** *Caption → ...* *Alt → ...*   (all one line, kind inferred from content, not just the label word)
 //  **[Place Diagram → diagrams/foo.png]**   (no number at all — diagrams match by filename anyway, so the number is optional everywhere)
-const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image)\s*(\d+)?\s*(?:→|·|-|—)\s*([^\]]+?)\]\*{0,2}\s*(.*)$/i;
+//  **[External image → search "term one" and "term two"]** (leading word is "External" itself, not "Image"/"Diagram" — kind inferred from this leading word too, not just payload content)
+const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image|External(?:\s+image)?)\s*(\d+)?\s*(?:→|·|-|—)\s*([^\]]+?)\]\*{0,2}\s*(.*)$/i;
+// A "Label → text" annotation line that isn't Caption or Alt (e.g. "Placement → ..."). Skipped
+// while scanning for Caption/Alt so it doesn't stop the scan early or get eaten as a paragraph.
+const ANNOTATION_RE = /^\*{0,2}[A-Za-z][\w\s]{0,24}?\s*(?:→|->)/;
 const CAPTION_RE = /^\*{1,2}Caption\s*→\s*(.+?)\*{1,2}\s*$/i;
 const ALT_RE = /^\*{1,2}Alt\s*→\s*(.+?)\*{1,2}\s*$/i;
 const INLINE_CAP_ALT_RE = /Caption\s*→\s*(.*?)\s*Alt\s*→\s*(.*)$/i;
@@ -114,28 +118,38 @@ function parseBody(raw) {
       if (/^diagram$/i.test(mm[1]) || /\.(png|jpe?g|webp|avif|gif)\s*$/i.test(payload)) {
         const base = payload.split(/[\\/]/).pop().replace(/\.(png|jpe?g|webp|avif|gif)$/i, "").toLowerCase();
         slot = { kind: "diagram", num, file: base, label: payload };
+      } else if (/^external/i.test(mm[1]) || /external/i.test(payload)) {
+        // one or more quoted search terms — e.g. **[External image → search "term one" and "term two"]**
+        const quotes = [...payload.matchAll(/["“]([^"”]+)["”]/g)].map((m) => m[1].trim());
+        const kw = quotes.length
+          ? quotes.join("  ·  or  ·  ")
+          : payload.replace(/^external(\s+image)?[,·:]?\s*/i, "").replace(/search\s*(for)?:?\s*/i, "").trim();
+        slot = { kind: "ext", num, keyword: kw, label: payload };
       } else if (/ai[- ]?generated/i.test(payload)) {
         slot = { kind: "ai", num, label: payload };
-      } else if (/external/i.test(payload)) {
-        const kw = (payload.match(/["“]([^"”]+)["”]/) || [, payload.replace(/external[,·]?\s*(search)?/i, "").trim()])[1];
-        slot = { kind: "ext", num, keyword: kw.trim(), label: payload };
       } else {
         slot = { kind: "ai", num, label: payload };
       }
-      // caption / alt: same line as the bracket first, then following lines as a fallback
+      // caption / alt: same line as the bracket first, then following lines as a fallback. Lines
+      // matching ANNOTATION_RE (e.g. "Placement → ...") are skipped rather than stopping the scan
+      // or getting silently swallowed as a paragraph — but genuinely unstructured prose still
+      // stops the scan immediately, so real article text is never eaten by mistake.
       let j = i + 1;
       const inlineCA = restSameLine.match(INLINE_CAP_ALT_RE);
       if (inlineCA) {
         slot.caption = inlineCA[1].replace(/\*+/g, "").trim();
         slot.alt = inlineCA[2].replace(/\*+/g, "").trim();
       } else {
-        while (j < lines.length) {
+        let scanned = 0;
+        while (j < lines.length && scanned < 8 && !(slot.caption && slot.alt)) {
           const s = lines[j].trim();
           if (!s) { j++; continue; }
+          if (MARKER_RE.test(s)) break; // don't bleed into the next marker's own territory
           const cm = s.match(CAPTION_RE), am = s.match(ALT_RE);
-          if (cm) { slot.caption = cm[1].trim(); j++; continue; }
-          if (am) { slot.alt = am[1].trim(); j++; continue; }
-          break;
+          if (cm) { slot.caption = cm[1].trim(); j++; scanned++; continue; }
+          if (am) { slot.alt = am[1].trim(); j++; scanned++; continue; }
+          if (ANNOTATION_RE.test(s)) { j++; scanned++; continue; } // e.g. "Placement → ..." — ignore, keep looking
+          break; // real prose, not a labeled annotation — stop, let the outer loop treat it as a paragraph
         }
       }
       i = j;
@@ -359,13 +373,15 @@ const slugify = () =>
 let resumedPathname = null;
 
 function buildSnapshot() {
-  const images = {};
-  state.slots.forEach((s) => { if (s.dataURL) images[s.num] = s.dataURL; });
+  // Deliberately text-only. Images are NOT duplicated here — they already live once inside the
+  // compiled `html` being uploaded in the same request, and Vercel Functions hard-cap request
+  // bodies at 4.5 MB (platform-level, not configurable). Duplicating every image a second time
+  // into the snapshot was the actual cause of "Server said 413" on ordinary publishes — fixed by
+  // recovering images for Resume from the already-published HTML instead (see resumeArticle).
   return {
     title: $("title").value.trim(),
     subtitle: $("subtitle").value.trim(),
     bodyRaw: $("body").value,
-    images,
   };
 }
 
@@ -419,9 +435,13 @@ $("save-draft").addEventListener("click", () => publishArticle(true));
 async function resumeArticle(pathname, skipConfirm) {
   if (!skipConfirm && !confirm("Load this into the wizard? Any unsaved current progress will be replaced.")) return;
   try {
-    const r = await fetch(`/api/snapshot?pathname=${encodeURIComponent(pathname)}`);
-    const snap = await r.json();
-    if (!r.ok) throw new Error(snap.error || r.statusText);
+    const [snapRes, htmlRes] = await Promise.all([
+      fetch(`/api/snapshot?pathname=${encodeURIComponent(pathname)}`),
+      fetch(`/api/view?pathname=${encodeURIComponent(pathname)}`),
+    ]);
+    const snap = await snapRes.json();
+    if (!snapRes.ok) throw new Error(snap.error || snapRes.statusText);
+    const compiledHtml = htmlRes.ok ? await htmlRes.text() : "";
 
     resumedPathname = pathname;
     $("title").value = snap.title || "";
@@ -431,7 +451,24 @@ async function resumeArticle(pathname, skipConfirm) {
     state.subtitle = snap.subtitle || "";
 
     parseBody(snap.bodyRaw || "");
-    state.slots.forEach((s) => { if (snap.images && snap.images[s.num]) s.dataURL = snap.images[s.num]; });
+
+    // Images live only in the compiled HTML (not the snapshot — see buildSnapshot). Recover them
+    // by matching each freshly re-parsed slot's caption text against the published article's own
+    // <figcaption> elements; a slot with no matching caption (never filled originally) is simply
+    // left empty, same as it was.
+    if (compiledHtml) {
+      const doc = new DOMParser().parseFromString(compiledHtml, "text/html");
+      const captionToSrc = new Map();
+      doc.querySelectorAll("figure").forEach((fig) => {
+        const img = fig.querySelector("img");
+        const cap = fig.querySelector("figcaption");
+        if (img && cap) captionToSrc.set(cap.textContent.trim(), img.getAttribute("src"));
+      });
+      state.slots.forEach((s) => {
+        const src = captionToSrc.get((s.caption || "").trim());
+        if (src) s.dataURL = src;
+      });
+    }
 
     renderAnalysis();
     renderSlots();
