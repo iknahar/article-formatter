@@ -257,22 +257,25 @@
     return articleEl;
   }
 
-  // Upload each data:-URI image to the hosted API, rewrite the <img src> to the real URL. Medium's
-  // paste handler fetches image sources over HTTP; a data: URI has nothing to fetch. Images that
-  // are already on a real URL (unusual in this flow but possible) are correctly skipped.
+  // Upload each data:-URI image and rewrite the <img src> to the real URL. Medium's paste handler
+  // fetches image sources over HTTP; a data: URI has nothing to fetch, so unhosted images get
+  // silently dropped on paste. We route the upload through the background service worker
+  // (chrome.runtime.sendMessage) instead of fetching medium-formatter.vercel.app directly here —
+  // a direct fetch from a content script on medium.com is cross-origin and the hosted API
+  // doesn't send permissive CORS headers, causing "Failed to fetch" the first time this ran.
+  // The worker runs on the extension's own origin, and the vercel host is in host_permissions,
+  // so from there the fetch is unrestricted. Images already on a real URL are skipped.
   async function hostImagesInline(articleEl) {
     const imgs = [...articleEl.querySelectorAll("img")].filter((im) => (im.getAttribute("src") || "").startsWith("data:"));
     if (!imgs.length) return;
     log(`Uploading ${imgs.length} image${imgs.length === 1 ? "" : "s"} to the hosting API…`);
     await Promise.all(imgs.map(async (img) => {
-      const r = await fetch(AF_API_BASE + "/api/upload-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataURL: img.getAttribute("src") }),
+      const reply = await chrome.runtime.sendMessage({
+        type: "af-upload-image",
+        dataURL: img.getAttribute("src"),
       });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || `Image upload failed (${r.status})`);
-      img.setAttribute("src", data.url);
+      if (!reply || !reply.ok) throw new Error((reply && reply.error) || "Upload failed (no reply from background worker)");
+      img.setAttribute("src", reply.url);
     }));
   }
 
