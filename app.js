@@ -364,39 +364,35 @@ pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font
 const slugify = () =>
   state.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "article";
 
-// Derive owner/repo from wherever this app is actually being served, so nothing is tied to one
-// account or one repo name — works unmodified for a fork or a rename. Falls back to the known
-// defaults only when there's no usable location (e.g. opened straight from disk via file://).
-function repoInfo() {
-  const host = location.hostname || "";
-  const owner = host.endsWith(".github.io") ? host.slice(0, -".github.io".length) : "iknahar";
-  const seg = location.pathname.split("/").filter(Boolean)[0];
-  const repo = seg || "article-formatter";
-  return { owner, repo };
-}
-
-// No token, no owner/repo fields to fill in. Clicking Publish computes the exact path/URL this
-// article will live at, downloads the HTML file under that same name, and tells the user to hand
-// that file to Claude (already authenticated in the Claude Code session) to actually commit it —
-// the predicted link goes live once that push happens, usually within about a minute for Pages
-// to rebuild.
-$("publish").addEventListener("click", () => {
-  const { owner, repo } = repoInfo();
-  const id = Date.now().toString(36);
-  const filename = `${slugify()}-${id}.html`;
-  const url = `https://${owner}.github.io/${repo}/articles/${filename}`;
+// One click, fully automatic: posts the compiled HTML to /api/publish (a Vercel serverless
+// function backed by Vercel Blob storage). The endpoint uploads it, gets a real public URL back
+// immediately, and enforces a rolling window — only the MAX_ARTICLES most recent stay live, older
+// ones are deleted automatically. Requires this app to be deployed on Vercel with a Blob store
+// connected (a static host like GitHub Pages has no serverless runtime, so /api/publish 404s
+// there — see README).
+$("publish").addEventListener("click", async () => {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
-  res.innerHTML = `<b>Your link (not live yet):</b><br>
-    <a href="${url}" target="_blank" rel="noopener">${url}</a>
-    <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
-    <br><small>Downloading <code>${esc(filename)}</code> now — send that file to Claude in your
-    chat and this exact link goes live once it's pushed (usually about a minute).</small>`;
-  $("copy-link").onclick = () => navigator.clipboard.writeText(url);
-
-  const blob = new Blob([exportHTML()], { type: "text/html" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
+  res.textContent = "Publishing…";
+  try {
+    const html = exportHTML();
+    const r = await fetch("/api/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: slugify(), html }),
+    });
+    let data;
+    try { data = await r.json(); } catch { data = { error: `Server said ${r.status} ${r.statusText}` }; }
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    res.innerHTML = `<b>Published.</b> Copy this link and use it wherever you need to import the story.<br>
+      <a href="${data.url}" target="_blank" rel="noopener">${data.url}</a>
+      <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
+      <br><small>Keeping your ${data.kept} most recent article${data.kept === 1 ? "" : "s"} live
+      ${data.deleted ? `, removed ${data.deleted} older one${data.deleted === 1 ? "" : "s"}` : ""}.</small>`;
+    $("copy-link").onclick = () => navigator.clipboard.writeText(data.url);
+  } catch (err) {
+    res.classList.add("error");
+    res.innerHTML = `<b>Publish failed.</b> ${esc(err.message)}<br>
+      Make sure this app is deployed on Vercel with a Blob store connected (README has the steps).`;
+  }
 });
