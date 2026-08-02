@@ -443,6 +443,24 @@
     ta.placeholder = "Paste here…";
     area.appendChild(ta);
 
+    // Paste button — reads the clipboard, drops it into the textarea, triggers analyze.
+    // Saves the two-step "click textarea, Ctrl+V" gesture the user would otherwise need.
+    const pasteBtn = document.createElement("button");
+    pasteBtn.textContent = "Paste from clipboard";
+    pasteBtn.style.cssText = S.btnOutline + ";margin-top:4px";
+    pasteBtn.onclick = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text) { log("Clipboard is empty.", "warn"); return; }
+        ta.value = text;
+        ta.dispatchEvent(new Event("input")); // re-runs analyze()
+      } catch (err) {
+        log("Couldn't read the clipboard: " + err.message, "err");
+        log("Click once in this page, then try again.", "warn");
+      }
+    };
+    area.appendChild(pasteBtn);
+
     const summary = document.createElement("div");
     summary.style.cssText = "margin-top:6px;min-height:20px";
     area.appendChild(summary);
