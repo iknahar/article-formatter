@@ -100,11 +100,11 @@ button{cursor:pointer; font-family:inherit}
 #preview h2{font-size:24px; margin:34px 0 12px; line-height:1.25}
 #preview .sub{font-style:italic; color:var(--muted); font-size:19px; margin-bottom:24px}
 #preview p{margin:0 0 16px}
-#preview figure{margin:26px 0}
+#preview figure{margin:26px 0 4px}
 #preview figure img{max-width:100%; border-radius:12px; display:block}
-#preview figcaption{font-family:system-ui,sans-serif; font-size:13px; color:var(--muted);
-  margin-top:8px; line-height:1.5}
-#preview figcaption .alt-note{display:block; font-size:11.5px; color:#a9a48c}
+#preview .img-caption{font-family:system-ui,sans-serif; font-size:13px; color:var(--muted);
+  margin:0 0 22px; line-height:1.5}
+#preview .img-caption .alt-note{display:block; font-size:11.5px; color:#a9a48c}
 #preview pre{background:#f2ecd9; border-radius:14px; padding:16px 18px; overflow-x:auto;
   font-size:13px; line-height:1.55; margin:0 0 18px; font-family:Consolas,monospace}
 #preview .missing{border:2px dashed var(--bad); color:var(--bad); border-radius:14px;

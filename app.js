@@ -86,7 +86,14 @@ function parseBody(raw) {
 
     if (line.trim().startsWith("```")) {
       flushPara();
-      if (inCode) { if (!skipSection) state.blocks.push({ type: "code", text: codeBuf.join("\n") }); codeBuf = []; }
+      if (inCode) {
+        // Guard against an empty code block — a stray/adjacent fence pair with nothing (or only
+        // whitespace) between the markers was producing a genuinely blank <pre><code></code></pre>
+        // that rendered as an empty gray box right after a real one.
+        const codeText = codeBuf.join("\n");
+        if (!skipSection && codeText.trim()) state.blocks.push({ type: "code", text: codeText });
+        codeBuf = [];
+      }
       inCode = !inCode; i++; continue;
     }
     if (inCode) { codeBuf.push(line); i++; continue; }
@@ -378,15 +385,25 @@ function slotFigure(s) {
     d.textContent = `Image ${s.num} (${s.kind}) is missing. Go back and paste it, then press Compile again.`;
     return d;
   }
+  // Caption is a plain sibling <p> after the <figure>, not nested inside a <figcaption> —
+  // Medium's story importer was dropping the figcaption's text entirely even though the image
+  // itself (and its alt attribute) came through fine, matching the same pattern as the
+  // data:-URI images and bare <pre> code blocks fixed earlier: it wants flatter, more
+  // conventional article-body markup, not semantically-nested structures.
+  const frag = document.createDocumentFragment();
   const f = document.createElement("figure");
   const img = document.createElement("img");
   img.src = s.dataURL; img.alt = s.alt || s.caption || `Image ${s.num}`;
   f.appendChild(img);
-  const fc = document.createElement("figcaption");
-  fc.innerHTML = esc(s.caption || "") +
-    (s.alt ? `<span class="alt-note">alt · ${esc(s.alt)}</span>` : "");
-  f.appendChild(fc);
-  return f;
+  frag.appendChild(f);
+  if (s.caption || s.alt) {
+    const cap = document.createElement("p");
+    cap.className = "img-caption";
+    cap.innerHTML = (s.caption ? `<em>${esc(s.caption)}</em>` : "") +
+      (s.alt ? `<span class="alt-note">alt · ${esc(s.alt)}</span>` : "");
+    frag.appendChild(cap);
+  }
+  return frag;
 }
 
 const el = (t, text) => { const n = document.createElement(t); n.textContent = text; return n; };
@@ -406,8 +423,8 @@ function exportHTML() {
 article{max-width:700px;margin:0 auto;padding:48px 20px 90px;font-size:18px}
 h1{font-size:2.1em;line-height:1.15;margin:.4em 0 .2em}h2{font-size:1.45em;margin:1.6em 0 .5em;line-height:1.25}
 .sub{font-style:italic;color:#6d6f78;font-size:1.15em;margin-bottom:1.4em}
-p{margin:0 0 1em}figure{margin:1.6em 0}figure img{max-width:100%;display:block;border-radius:8px}
-figcaption{font-family:system-ui,sans-serif;font-size:.75em;color:#6d6f78;margin-top:.6em}
+p{margin:0 0 1em}figure{margin:1.6em 0 .3em}figure img{max-width:100%;display:block;border-radius:8px}
+.img-caption{font-family:system-ui,sans-serif;font-size:.75em;color:#6d6f78;margin:0 0 1.6em}
 pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:.72em;line-height:1.55}
 pre code{font-family:Consolas,Menlo,monospace;white-space:pre}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -534,15 +551,20 @@ async function resumeArticle(pathname, skipConfirm) {
 
     // Images live only in the compiled HTML (not the snapshot — see buildSnapshot). Recover them
     // by matching each freshly re-parsed slot's caption text against the published article's own
-    // <figcaption> elements; a slot with no matching caption (never filled originally) is simply
-    // left empty, same as it was.
+    // sibling <p class="img-caption"> elements (captions live as a sibling paragraph after the
+    // <figure>, not nested inside it — see slotFigure); a slot with no matching caption (never
+    // filled originally) is simply left empty, same as it was.
     if (compiledHtml) {
       const doc = new DOMParser().parseFromString(compiledHtml, "text/html");
       const captionToSrc = new Map();
       doc.querySelectorAll("figure").forEach((fig) => {
         const img = fig.querySelector("img");
-        const cap = fig.querySelector("figcaption");
-        if (img && cap) captionToSrc.set(cap.textContent.trim(), img.getAttribute("src"));
+        const capEl = fig.nextElementSibling;
+        if (!img || !capEl || !capEl.classList.contains("img-caption")) return;
+        const clone = capEl.cloneNode(true);
+        clone.querySelectorAll(".alt-note").forEach((n) => n.remove());
+        const capText = clone.textContent.trim();
+        if (capText) captionToSrc.set(capText, img.getAttribute("src"));
       });
       state.slots.forEach((s) => {
         const src = captionToSrc.get((s.caption || "").trim());
