@@ -482,6 +482,36 @@ are correctly skipped, so nothing gets re-uploaded on every re-save.
 sound and code-reviewed, but confirming the fix needs the user to publish
 something fresh and actually try importing it.
 
+**Related, found immediately after (same import test):** code blocks were
+also missing entirely from the Medium import, and — more seriously — the
+imported article's *text* cut off partway through, well before the real
+end of the article. Root cause found for the code blocks: the compiled
+markup was a bare `<pre>text</pre>` with **no `<code>` child element at
+all** — not the standard HTML5 `<pre><code>...</code></pre>` shape most
+import/readability tools specifically look for to recognize "this is a
+code block." Fixed in the Compile step (`app.js`) to always wrap code text
+in a `<code>` element inside the `<pre>`. Separately, and independent of
+the import issue: `exportHTML()`'s embedded CSS never set a font-family
+for code at all, so a published article's code blocks were rendering in
+the serif body font instead of monospace even when they did survive —
+added `pre code{font-family:Consolas,Menlo,monospace;white-space:pre}` to
+match the live in-app preview's styling (`#preview pre` in `style.css`,
+which was already correct).
+
+**The truncation is treated as a likely *symptom* of the same failure
+class, not confirmed as a separate third bug.** Working theory: Medium's
+importer hit an element shape it couldn't parse (the `data:`-URI image or
+the bare `<pre>`), errored internally, and gave up on everything after
+that point rather than skipping the one bad element and continuing —
+consistent with the truncation point falling not too long after the
+article's first image/diagram. If that's right, fixing the images and
+code blocks should also fix the truncation, since the trigger is gone. **Not
+verified** — this needs the user to publish fresh (with the images-plus-
+code-blocks fix now live) and re-import to confirm the article comes
+through complete. If it *still* truncates at the same point, the cause is
+something else in the markup and needs the actual cutoff point identified
+from a real re-test to diagnose further.
+
 ## 6. History note: the parallel-build mistake
 
 Earlier in this project the assistant was *not* told this app already
@@ -525,8 +555,13 @@ what the assistant will perform) or leave it archived/private.
   future publishes, it doesn't retroactively repair what's already in
   Blob storage. If old articles matter, they need to be re-published
   (Resume → Compile → Publish again) to pick up real hosted image URLs.
-- [ ] Confirm the §5 image-hosting fix actually works by publishing
-  something fresh and importing it into Medium for real — not yet done.
+- [ ] Confirm the §5 image-hosting + code-block fixes actually work by
+  publishing something fresh and importing it into Medium for real — not
+  yet done. **Specifically check whether the article now comes through in
+  full** (the truncation theory needs this exact test to confirm or rule
+  out) — if it still cuts off at the same point, capture where exactly and
+  what content sits right before the cutoff, since that pinpoints the real
+  cause.
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
   private, or delete it themselves) — this repo doesn't exist anymore as of
   this writing (user deleted it), so this item is effectively resolved,

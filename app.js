@@ -351,7 +351,17 @@ $("compile").addEventListener("click", () => {
   state.blocks.forEach((b) => {
     if (b.type === "p") { const p = document.createElement("p"); p.innerHTML = inline(b.text); prev.appendChild(p); }
     else if (b.type === "h1" || b.type === "h2" || b.type === "h3") prev.appendChild(el(b.type === "h1" ? "h2" : "h2", b.text));
-    else if (b.type === "code") { const pre = document.createElement("pre"); pre.textContent = b.text; prev.appendChild(pre); }
+    else if (b.type === "code") {
+      // <pre><code> — not bare <pre>text</pre>. Import tools generally recognize the standard
+      // HTML5 code-block shape and preserve it; a bare <pre> with no <code> child was apparently
+      // being treated as unrecognized markup and dropped on Medium import, same failure class as
+      // the data:-URI images fixed earlier.
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.textContent = b.text;
+      pre.appendChild(code);
+      prev.appendChild(pre);
+    }
     else if (b.type === "slot") prev.appendChild(slotFigure(b.slot));
   });
   unlock("step-preview"); scrollTo_("step-preview");
@@ -395,7 +405,8 @@ h1{font-size:2.1em;line-height:1.15;margin:.4em 0 .2em}h2{font-size:1.45em;margi
 .sub{font-style:italic;color:#6d6f78;font-size:1.15em;margin-bottom:1.4em}
 p{margin:0 0 1em}figure{margin:1.6em 0}figure img{max-width:100%;display:block;border-radius:8px}
 figcaption{font-family:system-ui,sans-serif;font-size:.75em;color:#6d6f78;margin-top:.6em}
-pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:.72em;line-height:1.55}`;
+pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font-size:.72em;line-height:1.55}
+pre code{font-family:Consolas,Menlo,monospace;white-space:pre}`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(state.title)}</title>
