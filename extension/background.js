@@ -36,30 +36,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // Cross-origin image upload proxy for the content script. A content script on medium.com
-  // making a direct fetch to https://medium-formatter.vercel.app is a cross-origin request, and
-  // the hosted API doesn't send permissive CORS headers (it was originally called same-origin
-  // from the web app). The background service worker, however, runs on the extension's own
-  // origin, and any host in `host_permissions` (which includes medium-formatter.vercel.app) is
-  // callable without CORS — so we relay the upload through here. Same request, same body.
-  if (msg.type === "af-upload-image") {
-    (async () => {
-      try {
-        const r = await fetch("https://medium-formatter.vercel.app/api/upload-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataURL: msg.dataURL }),
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) { sendResponse({ ok: false, error: data.error || `Upload failed (${r.status})` }); return; }
-        sendResponse({ ok: true, url: data.url });
-      } catch (err) {
-        sendResponse({ ok: false, error: (err && err.message) || String(err) });
-      }
-    })();
-    return true;
-  }
-
   if (msg.type !== "af-send") return; // not ours
 
   (async () => {

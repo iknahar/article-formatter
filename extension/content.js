@@ -257,26 +257,42 @@
     return articleEl;
   }
 
-  // Upload each data:-URI image and rewrite the <img src> to the real URL. Medium's paste handler
-  // fetches image sources over HTTP; a data: URI has nothing to fetch, so unhosted images get
-  // silently dropped on paste. We route the upload through the background service worker
-  // (chrome.runtime.sendMessage) instead of fetching medium-formatter.vercel.app directly here —
-  // a direct fetch from a content script on medium.com is cross-origin and the hosted API
-  // doesn't send permissive CORS headers, causing "Failed to fetch" the first time this ran.
-  // The worker runs on the extension's own origin, and the vercel host is in host_permissions,
-  // so from there the fetch is unrestricted. Images already on a real URL are skipped.
-  async function hostImagesInline(articleEl) {
+  // Convert every data:-URI image to a same-origin blob: URL. Medium's paste handler needs to
+  // fetch each <img src> to re-host on its own CDN; a data: URI has nothing at that "address"
+  // (it isn't a network resource), so unhosted images used to get silently dropped on paste.
+  // A blob: URL, by contrast, is a real fetchable resource — same origin as this Medium page,
+  // lives entirely in this tab's memory, no server involved, no cost, no CORS. Medium fetches
+  // it and uploads the bytes to Medium's own CDN, then rewrites the img src to their CDN URL.
+  //
+  // The blob URLs stay alive for the tab's lifetime — we don't revokeObjectURL, because
+  // Medium's re-host happens async after the paste, and revoking too early would break it. The
+  // memory cost is bounded (~1 MB per compressed image, tens of MB total worst case).
+  function dataURLtoBlob(dataURL) {
+    const commaIdx = dataURL.indexOf(",");
+    if (commaIdx < 0) throw new Error("Malformed data URL");
+    const meta = dataURL.slice(5, commaIdx);          // e.g. "image/jpeg;base64"
+    const mime = (meta.match(/^([^;]+)/) || [])[1] || "application/octet-stream";
+    const raw = dataURL.slice(commaIdx + 1);
+    let bytes;
+    if (/;base64/i.test(meta)) {
+      const bin = atob(raw);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(raw));
+    }
+    return new Blob([bytes], { type: mime });
+  }
+
+  async function prepareImagesForPaste(articleEl) {
     const imgs = [...articleEl.querySelectorAll("img")].filter((im) => (im.getAttribute("src") || "").startsWith("data:"));
     if (!imgs.length) return;
-    log(`Uploading ${imgs.length} image${imgs.length === 1 ? "" : "s"} to the hosting API…`);
-    await Promise.all(imgs.map(async (img) => {
-      const reply = await chrome.runtime.sendMessage({
-        type: "af-upload-image",
-        dataURL: img.getAttribute("src"),
-      });
-      if (!reply || !reply.ok) throw new Error((reply && reply.error) || "Upload failed (no reply from background worker)");
-      img.setAttribute("src", reply.url);
-    }));
+    log(`Preparing ${imgs.length} image${imgs.length === 1 ? "" : "s"} for paste (no hosting)…`);
+    for (const img of imgs) {
+      const blob = dataURLtoBlob(img.getAttribute("src"));
+      const blobUrl = URL.createObjectURL(blob);
+      img.setAttribute("src", blobUrl);
+    }
   }
 
   // ================= panel + log ======================================================
@@ -653,7 +669,7 @@
     try {
       log("Building article…");
       const article = buildArticleDOM();
-      await hostImagesInline(article);
+      await prepareImagesForPaste(article);
       const pasteArticle = articleForPaste(article);
       const figs = [...pasteArticle.querySelectorAll("figure")];
       const alts = figs.map((f) => (f.querySelector("img")?.getAttribute("alt") || "").trim());
