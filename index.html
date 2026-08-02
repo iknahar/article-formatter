@@ -75,6 +75,22 @@
     <div class="preview-wrap">
       <article id="preview" contenteditable="true" spellcheck="false"></article>
     </div>
+    <div class="dest-box">
+      <label class="dest-label">Publish destination</label>
+      <select id="dest">
+        <option value="github">GitHub Pages (unique URL under iknahar.github.io)</option>
+        <option value="vercel">Vercel Blob (needs the Blob store connected)</option>
+      </select>
+      <div id="gh-config">
+        <div class="gh-row">
+          <input type="text" id="gh-owner" value="iknahar" placeholder="owner">
+          <input type="text" id="gh-repo" value="article-formatter" placeholder="repo">
+          <input type="text" id="gh-branch" value="main" placeholder="branch">
+        </div>
+        <input type="password" id="gh-token" placeholder="GitHub fine-grained token (contents: read & write on this repo)">
+        <p class="dest-note">The token is kept only in this browser (localStorage), it is never part of the published article.</p>
+      </div>
+    </div>
     <div class="publish-row">
       <button class="next big" id="publish">Publish · get Medium import link</button>
       <button class="ghost" id="download">Download HTML instead</button>

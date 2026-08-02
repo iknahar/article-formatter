@@ -12,6 +12,14 @@ A small wizard that assembles a Medium-import-ready article:
 8. Review the **editable preview** (captions and alt tags included)
 9. Press **Publish** to get a public link, then paste it into **medium.com → Import a story**
 
+## Deploy on GitHub Pages (recommended, free unique URLs)
+
+1. In this repo on GitHub go to **Settings → Pages → Build and deployment → Source: Deploy from a branch → `main` / `/ (root)`** → Save
+2. After ~1 minute the app is live at `https://iknahar.github.io/article-formatter/`
+3. Create a token for the Publish button: GitHub → **Settings → Developer settings → Fine-grained personal access tokens → Generate new token**, Repository access = only `article-formatter`, Permissions = **Contents: Read and write**. Copy it.
+4. In the app's publish step, keep destination **GitHub Pages**, paste the token (it's stored only in your browser), and hit Publish
+5. Each publish commits `articles/<slug>-<id>.html` to the repo and returns a unique link like `https://iknahar.github.io/article-formatter/articles/my-story-mf3k2a.html`, wait ~1 minute for Pages to rebuild, then paste it into **medium.com → Import a story**
+
 ## Deploy on Vercel
 
 1. Push this repo to GitHub
