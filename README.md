@@ -25,10 +25,15 @@ deletes the oldest beyond that, so there's nothing to clean up by hand. Change t
 are exempt from this limit entirely.
 
 **Manage articles** (bottom of the page): lists everything you've published or saved as a draft,
-with a **View** link and a **Delete** button for each. Note the one real limitation — only the
-*compiled* HTML is stored, not your original title/subtitle/pasted body/images, so there's no
-"reopen and re-edit" here. Delete removes it for good; to publish an updated version, redo the
-wizard and delete the old entry from the list yourself if you don't want both around.
+with **View**, **Resume**, and **Delete** for each. **Resume** reloads the wizard with that item's
+original title, subtitle, raw pasted body text, and every image (diagram, AI-generated, and
+external alike) restored exactly as they were — a real editable snapshot is saved alongside the
+compiled HTML every time you Publish or Save as draft, specifically so this works. Edit anything,
+hit Compile again, then Publish or Save as draft again — it overwrites the same entry in place
+(same link, true update) rather than creating a new one, as long as you're saving back to the
+same kind you resumed from (resuming a draft and hitting Publish instead creates a new published
+entry, and vice versa — the old one stays until you delete it yourself). Delete removes an item,
+and its saved snapshot, for good.
 
 ## Deploy on Vercel (required for Publish to work)
 

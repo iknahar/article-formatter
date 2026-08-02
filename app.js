@@ -352,26 +352,46 @@ pre{background:#f1f1ee;border-radius:10px;padding:16px 18px;overflow-x:auto;font
 const slugify = () =>
   state.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "article";
 
-// One click, fully automatic: posts the compiled HTML to /api/publish (a Vercel serverless
-// function backed by Vercel Blob storage). The endpoint uploads it, gets a real public URL back
-// immediately, and — for a real publish, not a draft — enforces a rolling window (MAX_ARTICLES
-// most recent stay live, older ones deleted automatically). Requires this app to be deployed on
-// Vercel with a Blob store connected (a static host like GitHub Pages has no serverless runtime,
-// so /api/publish 404s there — see README).
+// Tracks which stored item (if any) the wizard was loaded from via Resume. While set, publishing
+// or saving a draft overwrites that SAME pathname (true in-place update, same link) instead of
+// minting a new one. Cleared whenever the kind being saved (draft vs published) no longer matches
+// where it came from, since an overwrite across that boundary isn't allowed server-side anyway.
+let resumedPathname = null;
+
+function buildSnapshot() {
+  const images = {};
+  state.slots.forEach((s) => { if (s.dataURL) images[s.num] = s.dataURL; });
+  return {
+    title: $("title").value.trim(),
+    subtitle: $("subtitle").value.trim(),
+    bodyRaw: $("body").value,
+    images,
+  };
+}
+
+// One click, fully automatic: posts the compiled HTML (plus a raw-input snapshot for Resume) to
+// /api/publish (a Vercel serverless function backed by Vercel Blob storage). The endpoint uploads
+// it, gets a real public URL back immediately, and — for a real publish, not a draft — enforces a
+// rolling window (MAX_ARTICLES most recent stay live, older ones deleted automatically). Requires
+// this app to be deployed on Vercel with a Blob store connected (a static host like GitHub Pages
+// has no serverless runtime, so /api/publish 404s there — see README).
 async function publishArticle(isDraft) {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
   res.textContent = isDraft ? "Saving draft…" : "Publishing…";
   try {
     const html = exportHTML();
+    const prefix = isDraft ? "drafts/" : "articles/";
+    const overwritePathname = resumedPathname && resumedPathname.startsWith(prefix) ? resumedPathname : undefined;
     const r = await fetch("/api/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: slugify(), html, draft: isDraft }),
+      body: JSON.stringify({ slug: slugify(), html, draft: isDraft, snapshot: buildSnapshot(), overwritePathname }),
     });
     let data;
     try { data = await r.json(); } catch { data = { error: `Server said ${r.status} ${r.statusText}` }; }
     if (!r.ok) throw new Error(data.error || r.statusText);
+    resumedPathname = data.pathname || null;
     const label = isDraft ? "Draft saved." : "Published.";
     const note = isDraft
       ? "Drafts aren't limited or auto-deleted — find it any time in Manage articles below."
@@ -380,7 +400,7 @@ async function publishArticle(isDraft) {
     res.innerHTML = `<b>${label}</b> Copy this link and use it wherever you need to import the story.<br>
       <a href="${data.url}" target="_blank" rel="noopener">${data.url}</a>
       <button class="copy" id="copy-link" style="margin-left:10px">Copy link</button>
-      <br><small>${note}</small>`;
+      <br><small>${note}${overwritePathname ? " Updated in place — same link as before." : ""}</small>`;
     $("copy-link").onclick = () => navigator.clipboard.writeText(data.url);
     refreshArticleList();
   } catch (err) {
@@ -391,6 +411,34 @@ async function publishArticle(isDraft) {
 }
 $("publish").addEventListener("click", () => publishArticle(false));
 $("save-draft").addEventListener("click", () => publishArticle(true));
+
+// ---------- resume: reload a stored item's raw inputs back into the wizard ----------
+async function resumeArticle(item) {
+  if (!confirm("Load this into the wizard? Any unsaved current progress will be replaced.")) return;
+  try {
+    const r = await fetch(`/api/snapshot?pathname=${encodeURIComponent(item.pathname)}`);
+    const snap = await r.json();
+    if (!r.ok) throw new Error(snap.error || r.statusText);
+
+    resumedPathname = item.pathname;
+    $("title").value = snap.title || "";
+    $("subtitle").value = snap.subtitle || "";
+    $("body").value = snap.bodyRaw || "";
+    state.title = snap.title || "";
+    state.subtitle = snap.subtitle || "";
+
+    parseBody(snap.bodyRaw || "");
+    state.slots.forEach((s) => { if (snap.images && snap.images[s.num]) s.dataURL = snap.images[s.num]; });
+
+    renderAnalysis();
+    renderSlots();
+    renderDiagramStatus();
+    ["step-subtitle", "step-body", "step-diagrams", "step-images", "step-preview"].forEach(unlock);
+    scrollTo_("step-images");
+  } catch (err) {
+    alert("Couldn't resume: " + err.message);
+  }
+}
 
 // ---------- manage articles: list / view / delete everything stored ----------
 async function refreshArticleList() {
@@ -424,8 +472,10 @@ function articleRow(item) {
     </div>
     <div class="article-actions">
       <a href="${item.url}" target="_blank" rel="noopener" class="copy">View</a>
+      <button class="copy resume-btn">Resume</button>
       <button class="copy delete-btn">Delete</button>
     </div>`;
+  row.querySelector(".resume-btn").addEventListener("click", () => resumeArticle(item));
   row.querySelector(".delete-btn").addEventListener("click", async () => {
     if (!confirm(`Delete ${name}? This can't be undone.`)) return;
     try {

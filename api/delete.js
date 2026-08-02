@@ -10,7 +10,10 @@ export default async function handler(req, res) {
     if (!pathname || typeof pathname !== "string") {
       return res.status(400).json({ error: "Missing pathname" });
     }
-    await del(pathname);
+    // del() is a no-op (not an error) for a pathname that doesn't exist, so it's safe to always
+    // also try the companion snapshot even for articles published before Resume existed.
+    const jsonPathname = pathname.replace(/\.html$/, ".json");
+    await del([pathname, jsonPathname]);
     return res.status(200).json({ ok: true });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Delete failed" });

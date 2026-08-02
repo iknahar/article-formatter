@@ -17,9 +17,10 @@ export default async function handler(req, res) {
       size: b.size,
       url: `/api/view?pathname=${encodeURIComponent(b.pathname)}`,
     });
+    const isHtml = (b) => b.pathname.endsWith(".html");
     const items = [
-      ...pub.blobs.map(toEntry("published")),
-      ...drafts.blobs.map(toEntry("draft")),
+      ...pub.blobs.filter(isHtml).map(toEntry("published")),
+      ...drafts.blobs.filter(isHtml).map(toEntry("draft")),
     ].sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
     return res.status(200).json({ items });
   } catch (err) {

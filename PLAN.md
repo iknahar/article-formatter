@@ -97,52 +97,90 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
   (newer style — the label itself is discarded, only what follows is used
   as the prompt).
 
-## 3. Publishing, drafts, and article management
+## 3. Publishing, drafts, resume/update, and article management
 
-**Vercel Blob, fully automatic, rolling 20-article window, plus drafts and a
-management panel.** (Current design, 2026-08-02.) `POST /api/publish`
-(`api/publish.js`) takes `{ slug, html, draft }`:
+**Vercel Blob, fully automatic, rolling 20-article window, drafts, a
+management panel, and true resume/update.** (Current design, 2026-08-02.)
+`POST /api/publish` (`api/publish.js`) takes
+`{ slug, html, draft, snapshot, overwritePathname }`:
 
 1. Uploads the compiled HTML to Vercel Blob storage (`put()`, **private**
-   access — see the bug/fix below for why, random suffix so slugs never
-   collide) under `articles/<slug>-<id>.html` normally, or
-   `drafts/<slug>-<id>.html` when `draft: true`.
-2. **Published articles only:** lists all blobs under `articles/` (`list()`),
-   sorts newest-first, deletes (`del()`) everything beyond
+   access — see the bug/fix below for why) under
+   `articles/<slug>-<id>.html` normally, or `drafts/<slug>-<id>.html` when
+   `draft: true` — a fresh random-suffixed pathname by default, **or** the
+   exact `overwritePathname` given (with `allowOverwrite: true`,
+   `addRandomSuffix: false`) when resuming an existing item — see §6 for
+   what makes an update apply cleanly.
+2. If `snapshot` is present, also uploads it as a companion JSON at the
+   same pathname stem (`.json` instead of `.html`) — this is the wizard's
+   raw editable input (title, subtitle, raw pasted body text, and every
+   slot's image data, keyed by slot number), and it's what makes Resume
+   possible. Always sent by the client now (see §6).
+3. **Published articles only:** lists all `.html` blobs under `articles/`
+   (`list()`, filtering out `.json` companions so they're not double
+   counted), sorts newest-first, deletes (`del()`) everything beyond
    `MAX_ARTICLES`-most-recent (default 20, overridable via a `MAX_ARTICLES`
-   env var — no code change needed to tune it). **Drafts are exempt from
-   this window entirely** — saving a draft never triggers eviction, of
-   drafts or of published articles.
-3. Returns a link through this app's own `/api/view?pathname=...` route
-   (`api/view.js`) — not the raw blob URL, which isn't directly fetchable on
-   a private store — plus how many published articles are being kept/were
-   just deleted (`null`/`0` for drafts), straight back to the browser in the
+   env var), **and their companion `.json` files too**. **Drafts are
+   exempt from this window entirely.**
+4. Returns a link through this app's own `/api/view?pathname=...` route
+   (`api/view.js`) — not the raw blob URL, which isn't directly fetchable
+   on a private store — plus how many published articles are being
+   kept/deleted (`null`/`0` for drafts) and the actual `pathname` used (so
+   the client can track it for the next overwrite), straight back in the
    same request. One click, no polling, no manual hand-off.
 
 `GET /api/articles` (`api/articles.js`) lists everything under both
-`articles/` and `drafts/`, merged and sorted newest-first, each tagged
-`kind: "published"` or `"draft"`, with a ready-to-use `/api/view` link.
-`DELETE /api/delete` (`api/delete.js`, body `{ pathname }`) removes one blob
-by pathname — used by the Manage panel's Delete button on any item,
-published or draft.
+`articles/` and `drafts/`, filtered to `.html` only (companions are an
+implementation detail, never shown as separate items), merged and sorted
+newest-first, each tagged `kind: "published"` or `"draft"`, with a
+ready-to-use `/api/view` link. `GET /api/snapshot?pathname=...`
+(`api/snapshot.js`) fetches an item's companion `.json` for Resume — 404s
+cleanly for anything published before this feature existed, no companion
+saved. `DELETE /api/delete` (`api/delete.js`, body `{ pathname }`) removes
+one blob **and its companion snapshot** — used by the Manage panel's
+Delete button on any item, published or draft.
 
 **The "Manage articles" section** (bottom of `index.html`, always visible,
 not gated behind wizard progress) calls `GET /api/articles` on load and
 after every publish/save, renders each as a row (name, published/draft
-pill, timestamp, View link, Delete button), and calls `DELETE /api/delete`
-with a `confirm()` prompt before removing a row.
+pill, timestamp, **View** link, **Resume** button, **Delete** button), and
+calls `DELETE /api/delete` with a `confirm()` prompt before removing a row.
 
-**Real limitation, stated plainly (see also README):** Blob storage only
-ever holds the *compiled* HTML output — never the wizard's raw editable
-inputs (title, subtitle, pasted body text, matched diagram files, pasted
-AI/external images). So there is no "Update" in the true CRUD sense — no
-way to reopen a stored article back into the wizard and re-edit it. What
-exists today is Create (Publish/Save as draft), Read (the list + View
-link), and Delete. If true in-place editing is wanted later, it needs a
-new, separate feature: persisting the wizard's `state` object (not just the
-final HTML) as its own JSON blob, and a "load a saved draft back into the
-wizard" flow to consume it. Not built — flag this explicitly if asked for
-"Update" again, don't assume delete+republish silently satisfies it.
+### Resume / true update (added 2026-08-02, same day)
+
+The user asked directly for this after being told the earlier design only
+supported Create/Read/Delete, not Update, because Blob only stored the
+compiled HTML. Fixed by saving a **raw editable snapshot** alongside every
+publish/draft-save (see §3.2), and adding:
+
+- **Client (`app.js`) `buildSnapshot()`** — reads live DOM values
+  (`$("title").value`, `$("subtitle").value`, `$("body").value`, deliberately
+  *not* the possibly-stale `state.title`/`state.subtitle`) plus every
+  `state.slots[].dataURL` keyed by slot `num`. Since diagrams, AI images,
+  and external images all end up as a plain `dataURL` on their slot
+  regardless of kind once filled, **one snapshot mechanism covers all three
+  image types** — resuming restores diagram images too, no need to
+  re-select the diagram folder at all.
+- **`resumeArticle(item)`** — confirms before discarding unsaved wizard
+  state, fetches the snapshot, restores the title/subtitle/body inputs,
+  calls the existing `parseBody()` to re-derive `state.slots` from the raw
+  body text (same function used by the normal "Analyze" step), then
+  re-attaches each slot's saved `dataURL` by matching `num`, re-renders via
+  the existing `renderAnalysis()`/`renderSlots()`/`renderDiagramStatus()`,
+  unlocks every step through Preview, and scrolls to the images step so the
+  user immediately sees everything came back.
+- **`resumedPathname`** (module-level in `app.js`) — tracks what's
+  currently being edited. `publishArticle()` passes it as
+  `overwritePathname` only when its prefix (`articles/` vs `drafts/`)
+  matches what's about to be saved; mismatched cases (resumed a draft, hit
+  Publish — or the reverse) fall through to creating a **new** entry
+  instead, leaving the original untouched until manually deleted. This is a
+  deliberate, simple default rather than a scope/kind-conversion feature —
+  documented in the README, not hidden.
+
+This closes the Update gap from the original design note (now removed —
+Update exists, with the one caveat above about kind-crossing being a fresh
+create rather than a conversion).
 
 **Bug found and fixed (2026-08-02, same day):** first real Publish attempt
 after connecting the Blob store failed with `No token found. Either
@@ -287,22 +325,35 @@ what the assistant will perform) or leave it archived/private.
 
 ## 7. Known limitations / not yet verified
 
-- No screenshot-capable environment was available while fixing this — the
-  parser fix was verified by extracting and running it in isolated Node,
-  not by visually exercising the real browser UI end to end. The user
-  should run through the full 9-step flow once themselves to confirm.
-- The GitHub Pages publish flow (`publishToGitHub` in `app.js`) has not been
-  exercised with a real fine-grained PAT in this session — logic reviewed,
-  not live-tested against the GitHub Contents API with a real token.
-- Native OS folder-picker interaction (step 4) likewise not driven
-  end-to-end in this session.
+- No screenshot-capable environment is available in this session — every
+  fix (parser, publish/draft/resume logic) has been verified either by
+  extracting and running the relevant code in isolated Node, or by direct
+  code review against Vercel's own current docs, never by visually
+  exercising the real browser UI end to end. The user has been the one
+  actually clicking through the deployed app and reporting real errors back
+  — that loop is working well, keep relying on it rather than assuming
+  something works untested.
+- Native OS folder-picker interaction (diagram folder step) has not been
+  driven end-to-end in this session (same reason as above).
+- Resume/update (§3) is code-reviewed and syntax-checked but not yet
+  exercised against a real deployment by the user — the publish/draft flow
+  before it went through several real rounds of user-reported failures
+  (OIDC, then private-vs-public access) before working, so treat this as
+  "should work" rather than "confirmed" until the user reports back.
+- `GET /api/articles` calls `list()` twice (once per prefix) rather than
+  once — fine at this scale (personal use, well under Blob's list limits),
+  not worth optimizing unless it becomes slow.
 
 ## 8. Open TODOs
 
 - [ ] User: decide the fate of `iknahar/medium-automation` (leave, make
-  private, or delete it themselves).
-- [ ] User: say the word if the old commit message with "Medium" in it
-  should be scrubbed via history rewrite (destructive, needs explicit ask).
-- [ ] Do one real end-to-end run: paste a real package, load a real diagram
-  folder, paste real images, compile, publish with a real PAT, confirm the
-  resulting github.io link imports cleanly into the target platform.
+  private, or delete it themselves) — this repo doesn't exist anymore as of
+  this writing (user deleted it), so this item is effectively resolved,
+  kept here only as a record.
+- [ ] User: say the word if the old `article-formatter` commit message with
+  "Medium" in it should be scrubbed via history rewrite (destructive, needs
+  explicit ask) — low priority, cosmetic only.
+- [ ] Do one real end-to-end run of the full flow including Resume: paste a
+  real package, load a real diagram folder, paste real images, compile,
+  publish, then Resume that same item from Manage articles and confirm
+  everything (title/subtitle/body/all images) comes back correctly.
