@@ -25,10 +25,16 @@ placement/caption/alt-tag step — it does not write the article itself.
 ### The 9-step wizard (confirmed against the live app, 2026-08-02)
 
 1. **Title** — free text input, exactly as it should appear on the published page.
-2. **Subtitle** — a dropdown of auto-suggested subtitles (derived from the
-   title), or type your own.
-3. **Body copy** — paste the full article body (marker syntax below).
-   "Analyze" parses it and reports counts (diagram/AI/external slots,
+2. **Subtitle** — plain text input (was a dropdown of auto-suggestions
+   until 2026-08-02; the user found the suggestions weren't worth the
+   extra click, removed).
+3. **Body copy** — paste the whole package, SEO suite and all, or just the
+   body — doesn't matter. Before parsing, `stripPreamble()` looks for a
+   standalone line reading "the body" or "the article" (any heading level,
+   case-insensitive, optional trailing parenthetical) and discards
+   everything up to and including it; if no such line exists, the input is
+   used as-is (backward compatible with pasting just the body directly).
+   "Analyze" then parses it and reports counts (diagram/AI/external slots,
    paragraphs, headings, code blocks, prompts captured).
 4. **Diagram folder** — pick a folder; every diagram marker's file is
    auto-matched by filename (case-insensitive, extension-agnostic on the
@@ -72,6 +78,11 @@ mid-project and broke parsing (see §5). Recognized forms, in the body text:
 ```
 
 - Markdown `**`/`*` wrapping is optional and stripped before matching.
+- **The number is optional** — `[Place Diagram → diagrams/foo.png]` with no
+  `N` works fine. Diagrams have always matched by filename regardless of
+  number; when a marker omits the number, one is auto-assigned (from 1001
+  up) purely for the on-screen label, and doesn't collide with real
+  explicit numbers used elsewhere for AI-image prompt lookup.
 - `Caption →` / `Alt →` may be on the **same line** as the bracket (common
   when the source article wraps them in italics right after the bracket) or
   on the **following line(s)** — both are handled.
