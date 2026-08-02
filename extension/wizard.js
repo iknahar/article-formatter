@@ -106,7 +106,10 @@ function parseBody(raw) {
     const pm = tClean.match(/^Prompt\s+(\d+)\b[,.]?\s*(.*)$/i);
     const im = !pm && tClean.match(/^Image\s+(\d+)\b[\s·:.,-]*(.*)$/i);
     if (pm) { flushPara(); curPromptKey = pm[1]; state.prompts[curPromptKey] = (pm[2] || "").trim(); i++; continue; }
-    if (im) { flushPara(); curPromptKey = im[1]; state.prompts[curPromptKey] = ""; i++; continue; }
+    // "Image N <prompt text on same line>" — same-line text after the number is the START of the
+    // prompt (not "" — that silently discarded the whole prompt when the user's appendix put every
+    // "Image N …" onto a single line, as in this session's article).
+    if (im) { flushPara(); curPromptKey = im[1]; state.prompts[curPromptKey] = (im[2] || "").trim(); i++; continue; }
     if (skipSection && curPromptKey != null && t) {
       state.prompts[curPromptKey] = (state.prompts[curPromptKey] ? state.prompts[curPromptKey] + " " : "") + tClean;
       i++; continue;
@@ -119,6 +122,14 @@ function parseBody(raw) {
       skipSection = /image prompts/i.test(hm[2]);  // drop the prompt appendix from the article
       if (wasAppendix && !skipSection) curPromptKey = null;  // leaving the appendix, stop accumulating
       if (!skipSection) state.blocks.push({ type: "h" + hm[1].length, text: hm[2].trim() });
+      i++; continue;
+    }
+    // Also recognise a plain-caps "IMAGE PROMPTS" line as the appendix marker (no #), because
+    // Claude's SEO-suite template writes it that way. Without this, the appendix leaked into the
+    // article body and no AI-prompt text was captured for the slot cards.
+    if (!skipSection && /^\*{0,2}image\s+prompts\b/i.test(tClean)) {
+      flushPara();
+      skipSection = true;
       i++; continue;
     }
 
@@ -544,6 +555,33 @@ $("save-draft")?.addEventListener("click", () => publishArticle(true));
 // italic paragraph after each figure (how Medium authors caption anyway). Alt text is the one
 // thing a paste can't carry — Medium sets it through a separate dialog — so it's intentionally left
 // off here; that gap is exactly what the DOM-driving browser extension would fill.
+// Rewrite the sibling `<p class="img-caption"><em>text</em></p>` back into a nested
+// `<figcaption>text</figcaption>` inside the preceding `<figure>`. Two flows in this app want
+// opposite shapes for the same reason (Medium behaves differently on each path):
+//   - Publish/Import: Medium's story importer DROPS `<figcaption>` text on ingest, so exportHTML
+//     leaves captions as flat sibling `<p>`s to survive that path.
+//   - Paste/Send: Medium's live-editor PASTE handler is the opposite — it only recognises a
+//     caption inside `<figcaption>`; a sibling italic paragraph just becomes normal body italic
+//     and Medium's caption slot stays empty. This function converts the flat form back into the
+//     nested form right before the paste flow reads the HTML.
+function articleForPaste(articleEl) {
+  articleEl.querySelectorAll("figure").forEach((fig) => {
+    const next = fig.nextElementSibling;
+    if (!next || !next.classList || !next.classList.contains("img-caption")) return;
+    // The caption paragraph body is `<em>caption text</em>[<span class="alt-note">alt · ...</span>]`
+    // — pull only the caption text. exportHTML already strips alt-note; belt-and-braces here too.
+    const clone = next.cloneNode(true);
+    clone.querySelectorAll(".alt-note").forEach((n) => n.remove());
+    const capText = (clone.textContent || "").trim();
+    next.remove();
+    if (!capText) return;
+    const fc = articleEl.ownerDocument.createElement("figcaption");
+    fc.textContent = capText;
+    fig.appendChild(fc);
+  });
+  return articleEl;
+}
+
 async function copyForMedium() {
   const res = $("publish-result");
   res.classList.remove("hidden", "error");
@@ -551,10 +589,7 @@ async function copyForMedium() {
   try {
     const fullHtml = await hostImagesInline(exportHTML());
     const doc = new DOMParser().parseFromString(fullHtml, "text/html");
-    const article = doc.querySelector("article");
-    // Caption paragraphs already carry only <em>text</em> (the alt-note span is stripped in
-    // exportHTML). Drop the class so it pastes as an ordinary italic line, nothing Medium-specific.
-    article.querySelectorAll(".img-caption").forEach((p) => p.removeAttribute("class"));
+    const article = articleForPaste(doc.querySelector("article"));
     const html = article.innerHTML;
     const text = article.textContent;
     if (!navigator.clipboard || !window.ClipboardItem) {
@@ -593,8 +628,7 @@ async function sendToMedium() {
   try {
     const fullHtml = await hostImagesInline(exportHTML());
     const doc = new DOMParser().parseFromString(fullHtml, "text/html");
-    const article = doc.querySelector("article");
-    article.querySelectorAll(".img-caption").forEach((p) => p.removeAttribute("class"));
+    const article = articleForPaste(doc.querySelector("article"));
     const alts = [...article.querySelectorAll("figure img")].map((im) => (im.getAttribute("alt") || "").trim());
     const payload = { bodyHTML: article.innerHTML, text: article.textContent, alts };
 
