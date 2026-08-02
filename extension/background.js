@@ -15,9 +15,28 @@ chrome.action.onClicked.addListener(async () => {
   }
 });
 
+// Open the wizard from anywhere (used by the on-page panel's "Open the wizard" button).
+async function openWizard() {
+  const url = chrome.runtime.getURL("wizard.html");
+  const existing = await chrome.tabs.query({ url });
+  if (existing.length) {
+    await chrome.tabs.update(existing[0].id, { active: true });
+    if (existing[0].windowId != null) await chrome.windows.update(existing[0].windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url });
+  }
+}
+
 // Wizard → (this worker) → Medium tab's content script.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || msg.type !== "af-send") return; // not ours
+  if (!msg) return;
+
+  if (msg.type === "af-open-wizard") {
+    openWizard().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+
+  if (msg.type !== "af-send") return; // not ours
 
   (async () => {
     try {

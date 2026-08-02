@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Article Formatter — Medium",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Self-contained wizard: assemble an article (title, body, diagrams, AI/external images, captions, alt) and send it straight into an open Medium draft.",
   "permissions": ["clipboardRead", "clipboardWrite", "tabs"],
   "host_permissions": [
