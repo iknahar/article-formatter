@@ -409,6 +409,38 @@ error instead of silently hitting the platform wall — this can't catch
 every case (nothing running inside the function can, by definition), but
 it's strictly better than before.
 
+**Fifth bug, same day:** a real external-image slot showed correctly
+detected (kind, number, search keyword all right) but with `Caption → none`
+and `Alt → none` — genuinely not present, not just a display issue. Root
+cause, found by testing `CAPTION_RE`/`ALT_RE` in isolation: both were
+`/^\*{1,2}Caption\s*→\s*(.+?)\*{1,2}\s*$/i` — `{1,2}` requires **at least
+one** leading/trailing asterisk. A plain, unwrapped `Caption → text` line
+with *zero* markdown emphasis around it (which is exactly what this
+article's source used) never matched at all, silently. This was a
+longstanding gap, not something introduced recently — `MARKER_RE` and
+`ANNOTATION_RE` had always correctly used `{0,2}` (asterisks optional), but
+these two never did. Fixed: both changed to `{0,2}`, and both (plus
+`INLINE_CAP_ALT_RE`) now also accept `:` as an alternative to `→`/`->` as
+the separator, since "Caption"/"Alt" are specific enough keywords that a
+bare colon after them is safe to treat the same way (unlike the generic
+`ANNOTATION_RE`, which deliberately was *not* widened to include bare `:` —
+too many ordinary sentences use a "Word: explanation" shape, and treating
+those as skippable annotations risked eating real prose). Verified with an
+isolated Node test reproducing the exact reported case (numberless external
+marker, unwrapped `Caption →`/`Alt →` lines) — both now populate correctly,
+with surrounding real paragraphs still preserved.
+
+**Also added the same day, on request:** a **Copy** button next to the
+Search keyword for external-image slots (mirroring the AI slot's existing
+"Copy prompt" button) — both now wired generically via a shared
+`wireCopyButtons(card)` helper matching any `[data-copy]` button in a card,
+rather than the old single-button `querySelector(".copy")` approach. And
+the **whole card is now clickable** (`wireCardActivatesZone(card)`,
+applied to AI/external slot cards and diagram cards alike) — clicking
+anywhere in a slot card outside a real button forwards the click to its
+paste zone (`zone.click()`), so pasting or picking a file no longer
+requires aiming for the small dashed rectangle specifically.
+
 ## 6. History note: the parallel-build mistake
 
 Earlier in this project the assistant was *not* told this app already

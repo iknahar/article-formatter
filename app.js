@@ -47,9 +47,14 @@ const MARKER_RE = /^\*{0,2}\[\s*(?:Place\s+)?(Diagram|Image|External(?:\s+image)
 // A "Label → text" annotation line that isn't Caption or Alt (e.g. "Placement → ..."). Skipped
 // while scanning for Caption/Alt so it doesn't stop the scan early or get eaten as a paragraph.
 const ANNOTATION_RE = /^\*{0,2}[A-Za-z][\w\s]{0,24}?\s*(?:→|->)/;
-const CAPTION_RE = /^\*{1,2}Caption\s*→\s*(.+?)\*{1,2}\s*$/i;
-const ALT_RE = /^\*{1,2}Alt\s*→\s*(.+?)\*{1,2}\s*$/i;
-const INLINE_CAP_ALT_RE = /Caption\s*→\s*(.*?)\s*Alt\s*→\s*(.*)$/i;
+// accepts → / -> / : as the separator — "Caption" and "Alt" are specific enough keywords that a
+// bare colon after them is safe to treat as the same thing, unlike the generic ANNOTATION_RE above
+// where a colon would be too easily confused with ordinary "Word: sentence" prose.
+// {0,2} not {1,2} on both sides — markdown italic/bold wrapping is optional, a plain unwrapped
+// "Caption → text" line with no asterisks at all was silently failing to match before this fix.
+const CAPTION_RE = /^\*{0,2}Caption\s*(?:→|->|:)\s*(.+?)\*{0,2}\s*$/i;
+const ALT_RE = /^\*{0,2}Alt\s*(?:→|->|:)\s*(.+?)\*{0,2}\s*$/i;
+const INLINE_CAP_ALT_RE = /Caption\s*(?:→|->|:)\s*(.*?)\s*Alt\s*(?:→|->|:)\s*(.*)$/i;
 // unwrap markdown emphasis so brackets/captions read as plain text regardless of ** / * wrapping
 const stripEmph = (s) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1");
 
@@ -209,7 +214,32 @@ function renderDiagramStatus() {
       <div class="meta"><b>File →</b> ${esc(s.label)}</div>
       <div class="meta"><b>Caption →</b> ${esc(s.caption || "none")}</div>`;
     card.appendChild(makePasteZone(s, s.dataURL ? "Matched from folder ✓" : "Not found in folder. Click here and paste it, or click to browse."));
+    wireCardActivatesZone(card);
     wrap.appendChild(card);
+  });
+}
+
+// wires every [data-copy] button in a card to copy its value to the clipboard, with a brief
+// "Copied ✓" confirmation before reverting to its own original label
+function wireCopyButtons(card) {
+  card.querySelectorAll("[data-copy]").forEach((cp) => {
+    const label = cp.dataset.label || cp.textContent;
+    cp.addEventListener("click", (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(cp.dataset.copy);
+      cp.textContent = "Copied ✓"; setTimeout(() => (cp.textContent = label), 1500);
+    });
+  });
+}
+
+// clicking anywhere on the card (outside a real button and outside the paste zone itself)
+// activates the paste zone inside it, so Ctrl+V or the file picker works without having to
+// aim for the small dashed rectangle specifically
+function wireCardActivatesZone(card) {
+  card.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;
+    const zone = card.querySelector(".pastezone");
+    if (zone && !zone.contains(e.target)) zone.click();
   });
 }
 
@@ -231,19 +261,17 @@ function slotCard(s) {
   let inner = `<h4>Image ${s.num}${tag}</h4>`;
   if (s.kind === "ai") {
     inner += `<div class="prompt">${esc(s.prompt || "No prompt found for this number, paste any image.")}</div>
-      <button class="copy" data-copy="${escAttr(s.prompt || "")}">Copy prompt</button>`;
+      <button type="button" class="copy" data-copy="${escAttr(s.prompt || "")}" data-label="Copy prompt">Copy prompt</button>`;
   } else {
-    inner += `<div class="meta"><b>Search →</b> ${esc(s.keyword || s.label)}</div>`;
+    inner += `<div class="meta"><b>Search →</b> ${esc(s.keyword || s.label)}</div>
+      <button type="button" class="copy" data-copy="${escAttr(s.keyword || s.label || "")}" data-label="Copy keyword">Copy keyword</button>`;
   }
   inner += `<div class="meta"><b>Caption →</b> ${esc(s.caption || "none")}</div>
     <div class="meta"><b>Alt →</b> ${esc(s.alt || "none")}</div>`;
   card.innerHTML = inner;
   card.appendChild(makePasteZone(s, "Click, then paste the image here (Ctrl+V)"));
-  const cp = card.querySelector(".copy");
-  if (cp) cp.addEventListener("click", () => {
-    navigator.clipboard.writeText(cp.dataset.copy);
-    cp.textContent = "Copied ✓"; setTimeout(() => (cp.textContent = "Copy prompt"), 1500);
-  });
+  wireCopyButtons(card);
+  wireCardActivatesZone(card);
   return card;
 }
 
