@@ -5,10 +5,10 @@
   --good:#2fa878; --warn:#e2914b; --bad:#d95c50;
 }
 body{background:var(--bg); color:var(--ink);
-  font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55}
+  font-family:'Plus Jakarta Sans',system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55}
 .top{display:flex; justify-content:space-between; align-items:center; gap:16px;
   padding:20px 32px; position:sticky; top:0; z-index:20; background:var(--bg)}
-.brand{font-weight:800; font-size:17px; display:flex; align-items:center; gap:10px}
+.brand{font-weight:700; font-size:17px; display:flex; align-items:center; gap:10px}
 .mark{background:var(--ink); color:var(--accent); border-radius:8px; padding:4px 9px; font-size:13px}
 .hint{font-size:12.5px; color:var(--muted)}
 
@@ -21,7 +21,7 @@ body{background:var(--bg); color:var(--ink);
 .pill-tab:not(.active):hover{color:var(--ink)}
 
 main{max-width:900px; margin:0 auto; padding:8px 24px 120px; display:grid; gap:22px}
-.welcome{font-size:32px; font-weight:800; letter-spacing:-.02em; margin:14px 0 4px}
+.welcome{font-size:32px; font-weight:700; letter-spacing:-.02em; margin:14px 0 4px}
 .welcome-sub{color:var(--muted); font-size:14.5px; margin-bottom:6px}
 
 .step{background:var(--card); border:1px solid var(--rule); border-radius:24px;
@@ -29,8 +29,8 @@ main{max-width:900px; margin:0 auto; padding:8px 24px 120px; display:grid; gap:2
 .step.locked{opacity:.4; pointer-events:none}
 .step-head{display:flex; align-items:center; gap:14px; margin-bottom:10px}
 .step-head .n{width:32px; height:32px; border-radius:50%; background:var(--accent);
-  color:var(--accent-ink); display:grid; place-items:center; font-weight:800; font-size:15px}
-h2{font-size:21px; letter-spacing:-.01em; font-weight:800}
+  color:var(--accent-ink); display:grid; place-items:center; font-weight:700; font-size:15px}
+h2{font-size:21px; letter-spacing:-.01em; font-weight:600}
 .lead{color:var(--muted); font-size:14.5px; margin-bottom:18px; max-width:64ch}
 .lead code{background:var(--accent-soft); color:#7a5f00; border-radius:6px;
   padding:1px 7px; font-size:12.5px}
@@ -62,7 +62,7 @@ button{cursor:pointer; font-family:inherit}
   gap:18px; margin:18px 0 6px}
 .slot{border:1px solid var(--rule); border-radius:18px; padding:16px; background:var(--card-soft)}
 .slot h4{font-size:14.5px; margin-bottom:6px}
-.slot h4 .tag{font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+.slot h4 .tag{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
   border-radius:999px; padding:2px 10px; margin-left:8px; vertical-align:1px}
 .tag.ai{background:rgba(47,168,120,.14); color:var(--good)}
 .tag.ext{background:rgba(226,145,75,.16); color:var(--warn)}
@@ -116,7 +116,7 @@ button{cursor:pointer; font-family:inherit}
 .stat-row{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
 .stat-card{background:var(--card); border:1px solid var(--rule); border-radius:22px;
   padding:22px 24px; box-shadow:0 2px 10px rgba(60,50,20,.05)}
-.stat-num{font-size:34px; font-weight:800; letter-spacing:-.02em}
+.stat-num{font-size:34px; font-weight:700; letter-spacing:-.02em}
 .stat-label{color:var(--muted); font-size:13px; font-weight:600; margin-top:2px}
 .article-list{margin-top:18px; display:grid; gap:10px}
 .article-row{display:flex; align-items:center; justify-content:space-between; gap:16px;
