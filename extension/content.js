@@ -217,9 +217,19 @@
     return frag;
   }
 
+  // Build the article DOM WITHOUT images inline. In place of each figure we insert a plain-text
+  // marker paragraph ("[[AF-IMG-N]]") that we can find in Medium's editor after the body paste.
+  // Then we paste each image separately, at the marker position, using Medium's own image-paste
+  // handler (proven reliable — it's how manual Ctrl+V of a copied image works). This avoids
+  // relying on Medium's HTML-paste path to fetch <img src>, which rejected both data: and blob:
+  // schemes in testing.
+  //
+  // Returns { article, images } where images is [{ marker, blob, alt, caption }] in figure order.
   function buildArticleDOM() {
     matchDiagrams();
     const article = document.createElement("article");
+    const images = [];
+    let imgN = 0;
     state.blocks.forEach((b) => {
       if (b.type === "p") { const p = document.createElement("p"); p.innerHTML = inline(b.text); article.appendChild(p); }
       else if (b.type === "h1" || b.type === "h2" || b.type === "h3") {
@@ -232,9 +242,18 @@
         pre.appendChild(code);
         article.appendChild(pre);
       }
-      else if (b.type === "slot") article.appendChild(slotFigure(b.slot));
+      else if (b.type === "slot") {
+        const s = b.slot;
+        if (!s.dataURL) return; // missing images: skip silently, user was warned in the slot card
+        imgN += 1;
+        const marker = `[[AF-IMG-${imgN}]]`;
+        const p = document.createElement("p");
+        p.textContent = marker;
+        article.appendChild(p);
+        images.push({ marker, blob: dataURLtoBlob(s.dataURL), alt: s.alt || s.caption || `Image ${s.num}`, caption: s.caption || "" });
+      }
     });
-    return article;
+    return { article, images };
   }
 
   // Move sibling <p class="img-caption"> back INTO a nested <figcaption> per figure, which is
@@ -257,16 +276,11 @@
     return articleEl;
   }
 
-  // Convert every data:-URI image to a same-origin blob: URL. Medium's paste handler needs to
-  // fetch each <img src> to re-host on its own CDN; a data: URI has nothing at that "address"
-  // (it isn't a network resource), so unhosted images used to get silently dropped on paste.
-  // A blob: URL, by contrast, is a real fetchable resource — same origin as this Medium page,
-  // lives entirely in this tab's memory, no server involved, no cost, no CORS. Medium fetches
-  // it and uploads the bytes to Medium's own CDN, then rewrites the img src to their CDN URL.
-  //
-  // The blob URLs stay alive for the tab's lifetime — we don't revokeObjectURL, because
-  // Medium's re-host happens async after the paste, and revoking too early would break it. The
-  // memory cost is bounded (~1 MB per compressed image, tens of MB total worst case).
+  // Turn a "data:image/jpeg;base64,..." (or URL-encoded) URI into a real Blob. Used by
+  // buildArticleDOM to hand off each pasted image as a File to Medium's image-paste handler,
+  // which is what actually gets it into the Medium draft — Medium's HTML-paste path rejects
+  // both data: and blob: image sources in practice, but its image-paste path (the code that
+  // fires when a user Ctrl+V's a copied image) accepts a File and hosts it on Medium's CDN.
   function dataURLtoBlob(dataURL) {
     const commaIdx = dataURL.indexOf(",");
     if (commaIdx < 0) throw new Error("Malformed data URL");
@@ -282,17 +296,6 @@
       bytes = new TextEncoder().encode(decodeURIComponent(raw));
     }
     return new Blob([bytes], { type: mime });
-  }
-
-  async function prepareImagesForPaste(articleEl) {
-    const imgs = [...articleEl.querySelectorAll("img")].filter((im) => (im.getAttribute("src") || "").startsWith("data:"));
-    if (!imgs.length) return;
-    log(`Preparing ${imgs.length} image${imgs.length === 1 ? "" : "s"} for paste (no hosting)…`);
-    for (const img of imgs) {
-      const blob = dataURLtoBlob(img.getAttribute("src"));
-      const blobUrl = URL.createObjectURL(blob);
-      img.setAttribute("src", blobUrl);
-    }
   }
 
   // ================= panel + log ======================================================
@@ -695,17 +698,11 @@
   async function runAssemble() {
     try {
       log("Building article…");
-      const article = buildArticleDOM();
-      await prepareImagesForPaste(article);
-      const pasteArticle = articleForPaste(article);
-      const figs = [...pasteArticle.querySelectorAll("figure")];
-      const alts = figs.map((f) => (f.querySelector("img")?.getAttribute("alt") || "").trim());
-      const captions = figs.map((f) => (f.querySelector("figcaption")?.textContent || "").trim());
+      const { article, images } = buildArticleDOM();
       const payload = {
-        bodyHTML: pasteArticle.innerHTML,
-        text: pasteArticle.textContent,
-        alts,
-        captions,
+        bodyHTML: article.innerHTML,
+        text: article.textContent,
+        images, // [{ marker, blob, alt, caption }] — pasted separately after the body
       };
       log("Inserting into your Medium draft…");
       const summary = await insertArticle(payload);
@@ -782,35 +779,95 @@
         `Inserting again will DUPLICATE the article. Continue anyway?`
       );
       if (!proceed) {
-        log("Insert cancelled — draft already has content. Use the 'Fill captions & alt' link on step 1 instead.", "warn");
+        log("Insert cancelled — draft already has content.", "warn");
         return "insert cancelled (draft not empty)";
       }
     }
+
+    // 1) Paste the body (with text markers where images belong, no <img> tags at all).
     log("Inserting body via a synthetic paste…");
     placeCaretAtEnd(ed);
     const dt = new DataTransfer();
     dt.setData("text/html", src.bodyHTML);
     dt.setData("text/plain", src.text || "");
     ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    // Give Medium a moment to render the pasted text.
+    await sleep(900);
 
-    log("Waiting for images to finish uploading…");
-    const wantImgs = (src.alts || []).length;
-    const start = Date.now();
-    let last = -1, stableSince = Date.now();
-    while (Date.now() - start < 45000) {
-      const nnow = document.querySelectorAll("figure.graf--figure").length;
-      if (nnow !== last) { last = nnow; stableSince = Date.now(); }
-      else if (nnow >= wantImgs && Date.now() - stableSince > 1800) break;
-      await sleep(350);
+    // 2) For each image, find its text marker in the editor and paste the raw image bytes there.
+    // Medium's IMAGE paste handler is a completely separate code path from its HTML paste path,
+    // and it's the reliable one — it's the same path fired when a user Ctrl+V's a copied image.
+    const images = src.images || [];
+    log(`Inserting ${images.length} image${images.length === 1 ? "" : "s"} in place…`);
+    let insertedFigs = 0;
+    for (const item of images) {
+      const p = findMarkerParagraph(item.marker);
+      if (!p) { log(`Marker ${item.marker} not found in editor — skipping.`, "warn"); continue; }
+      p.scrollIntoView({ block: "center" });
+      await sleep(120);
+
+      // Select the entire marker paragraph so the pasted image replaces it, not appends after.
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      // Build a Files-only DataTransfer — same shape as a real image paste from the OS clipboard.
+      // We use `.items.add(File)` because just setting `.files` is read-only in some browsers.
+      const file = new File([item.blob], `af-img-${insertedFigs + 1}.jpg`, { type: item.blob.type || "image/jpeg" });
+      const idt = new DataTransfer();
+      try { idt.items.add(file); } catch (e) { log("DataTransfer.items.add failed: " + e.message, "err"); continue; }
+
+      ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: idt, bubbles: true, cancelable: true }));
+
+      // Wait for a new figure to appear (Medium uploads to its own CDN async).
+      const before = document.querySelectorAll("figure.graf--figure").length;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000) {
+        if (document.querySelectorAll("figure.graf--figure").length > before) break;
+        await sleep(200);
+      }
+      const now = document.querySelectorAll("figure.graf--figure").length;
+      if (now > before) {
+        insertedFigs = now;
+        // If Medium kept the marker paragraph around, remove it — the image replaced the selection
+        // in some builds and inserted a new node in others; either way the marker text is stale.
+        const leftover = findMarkerParagraph(item.marker);
+        if (leftover) leftover.remove();
+      } else {
+        log(`Image at ${item.marker} didn't upload — Medium may have rejected the paste.`, "warn");
+      }
     }
-    const got = document.querySelectorAll("figure.graf--figure").length;
-    if (!got && wantImgs) {
-      log("No images appeared — the synthetic paste probably didn't take in this browser.", "err");
-      return "body did not insert.";
+
+    const finalCount = document.querySelectorAll("figure.graf--figure").length;
+    log(`Inserted ${finalCount} image${finalCount === 1 ? "" : "s"}. Now filling alt & captions.`);
+
+    // 3) Fill alt + captions on the resulting figures, in the order we inserted them. Because
+    // Medium's editor appended each new figure at the marker position IN ORDER, `figs[k]`
+    // corresponds to `images[k]`. If any images failed to insert, the mapping stays intact
+    // for the ones that did — filling stops at the shorter of the two arrays.
+    const filledFigs = [...document.querySelectorAll("figure.graf--figure")];
+    const alts = images.map((im) => im.alt);
+    const captions = images.map((im) => im.caption);
+    const n = Math.min(filledFigs.length, alts.length);
+    let okAlt = 0, okCap = 0;
+    for (let i = 0; i < n; i++) {
+      if (alts[i]) { log(`Image ${i + 1}/${n}: setting alt…`); if (await setAlt(filledFigs[i], alts[i])) okAlt++; await sleep(200); }
+      if (captions[i]) { log(`Image ${i + 1}/${n}: setting caption…`); if (await setCaption(filledFigs[i], captions[i])) okCap++; await sleep(120); }
     }
-    await fillAlts(src.alts || []);
-    await fillCaptions(src.captions || []);
-    return `inserted body; images in editor: ${got}.`;
+    log(`Alt: ${okAlt}/${n} filled. Captions: ${okCap}/${n} filled.`, "ok");
+    return `body + ${finalCount} images inserted; alt ${okAlt}/${n}, captions ${okCap}/${n}.`;
+  }
+
+  // Find the paragraph in Medium's editor whose text contains our marker. We check <p> first
+  // (Medium's most common paragraph shape) and fall back to any element in the editor. The
+  // marker text is unique enough that a substring match is safe.
+  function findMarkerParagraph(marker) {
+    const ed = findEditor();
+    if (!ed) return null;
+    const candidates = [...ed.querySelectorAll("p, div.graf, span.graf")];
+    return candidates.find((el) => (el.textContent || "").includes(marker)) || null;
   }
 
   async function setAlt(figure, altText) {
