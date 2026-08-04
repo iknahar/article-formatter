@@ -80,10 +80,69 @@
     state.blocks = []; state.prompts = {}; state.slots = [];
     const lines = raw.replace(/\r/g, "").split("\n");
     let i = 0, inCode = false, codeBuf = [], paraBuf = [], skipSection = false, curPromptKey = null, autoNum = 0;
+    // A "block" is the run of consecutive non-blank, non-special lines the outer loop collects
+    // into paraBuf. Flushing it isn't "one block = one paragraph" anymore — the SEO suite and
+    // article both use plain-text conventions (all-caps section names, title-case sub-heads,
+    // numbered lists) with inconsistent blank lines between them. We look at what SHAPE the
+    // block has and split accordingly:
+    //
+    //   - All lines are "1. foo" / "2. foo" → ordered list.
+    //   - Walk lines: each one that looks like a heading (short, clean-ending, capital/digit
+    //     start, not numbered) emits its own <h2>/<h3>. Non-heading lines collect into a
+    //     paragraph joined by spaces. This handles the exact real-world case seen in the
+    //     user's paste — "THE SEO SUITE / 20 Curiosity Titles" with no blank line between,
+    //     and "Start With the Shower / Every hotel shower..." same story.
+    //
+    // Heading rules are conservative on purpose: sentence-ending punctuation (. ! ? , ; :)
+    // disqualifies immediately, and lines beginning with "N. " are excluded (those belong to
+    // a list, not a heading). Trailing parentheticals like "(40-60 characters)" are stripped
+    // before the punctuation check so they don't block detection.
+    const isHeadingLine = (l) => {
+      if (!l) return false;
+      const bare = l.replace(/\s*\([^)]*\)\s*$/, "");
+      const endsCleanly = !/[.!?,;:]$/.test(bare);
+      const isShort = l.length <= 90;
+      const looksLikeTitle = /^[A-Z0-9]/.test(l);
+      const notNumbered = !/^\d+\.\s+/.test(l);
+      // Headings very rarely contain internal commas — that's usually the signature of a
+      // list of items (e.g. "Machine Learning, Mathematics, Data Science, …") or a sentence.
+      // We check the bare version (parenthetical stripped) so "Cover Image Prompt (with, and,)"
+      // still qualifies while "Foo, Bar, Baz" doesn't.
+      const noInternalCommas = !/,/.test(bare);
+      return isShort && endsCleanly && looksLikeTitle && notNumbered && noInternalCommas;
+    };
     const flushPara = () => {
-      const text = paraBuf.join(" ").trim();
-      paraBuf = [];
-      if (text && !skipSection) state.blocks.push({ type: "p", text });
+      const rawLines = paraBuf; paraBuf = [];
+      if (skipSection) return;
+      const nonEmpty = rawLines.map((l) => l.trim()).filter(Boolean);
+      if (!nonEmpty.length) return;
+
+      // All-numbered block → ordered list.
+      const allNumbered = nonEmpty.length >= 2 && nonEmpty.every((l) => /^\d+\.\s+/.test(l));
+      if (allNumbered) {
+        const items = nonEmpty.map((l) => l.replace(/^\d+\.\s+/, "").trim());
+        state.blocks.push({ type: "list", ordered: true, items });
+        return;
+      }
+
+      // Walk the block. Heading-candidate lines emit their own heading; everything else
+      // collects into a paragraph.
+      let paraLines = [];
+      const flushParaLines = () => {
+        if (!paraLines.length) return;
+        state.blocks.push({ type: "p", text: paraLines.join(" ") });
+        paraLines = [];
+      };
+      for (const l of nonEmpty) {
+        if (isHeadingLine(l)) {
+          flushParaLines();
+          const isCaps = l === l.toUpperCase() && /[A-Z]/.test(l);
+          state.blocks.push({ type: isCaps ? "h2" : "h3", text: l });
+        } else {
+          paraLines.push(l);
+        }
+      }
+      flushParaLines();
     };
     while (i < lines.length) {
       const line = lines[i];
@@ -232,8 +291,20 @@
     let imgN = 0;
     state.blocks.forEach((b) => {
       if (b.type === "p") { const p = document.createElement("p"); p.innerHTML = inline(b.text); article.appendChild(p); }
-      else if (b.type === "h1" || b.type === "h2" || b.type === "h3") {
+      else if (b.type === "h1" || b.type === "h2") {
         const h = document.createElement("h2"); h.textContent = b.text; article.appendChild(h);
+      }
+      else if (b.type === "h3") {
+        const h = document.createElement("h3"); h.textContent = b.text; article.appendChild(h);
+      }
+      else if (b.type === "list") {
+        const list = document.createElement(b.ordered ? "ol" : "ul");
+        b.items.forEach((item) => {
+          const li = document.createElement("li");
+          li.innerHTML = inline(item);
+          list.appendChild(li);
+        });
+        article.appendChild(list);
       }
       else if (b.type === "code") {
         const pre = document.createElement("pre");
