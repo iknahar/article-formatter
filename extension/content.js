@@ -453,8 +453,29 @@
     renderStep();
   }
 
+  // The panel should only appear on a real Medium draft edit page. medium.com has many other
+  // surfaces (article read pages, response/comment overlays, notifications, membership pages)
+  // where a `[contenteditable="true"]` element exists but is NOT a draft body — e.g. the
+  // response box on someone else's article. Match the exact URL shapes Medium uses for
+  // author-facing drafts and nothing else. Medium is a SPA, so also watch for URL changes and
+  // remove the panel when the user navigates away from a draft.
+  function isDraftEditPage() {
+    const h = location.href;
+    return (
+      /^https:\/\/medium\.com\/p\/[a-z0-9]+\/edit\/?/i.test(h) ||   // /p/<id>/edit
+      /^https:\/\/medium\.com\/new-story\b/i.test(h) ||               // /new-story
+      /^https:\/\/medium\.com\/@[^/]+\/[^/]+\/edit\/?/i.test(h)      // /@user/<slug>/edit
+    );
+  }
   function ensurePanel() {
-    if (document.querySelector('[data-af-panel]')) return;
+    const existing = document.querySelector('[data-af-panel]');
+    if (!isDraftEditPage()) {
+      // Panel was left on a page we're no longer editing — tear it down and reset state so a
+      // fresh session begins next time the user opens a draft.
+      if (existing) { existing.remove(); state.step = "body"; state.bodyRaw = ""; state.blocks = []; state.slots = []; state.prompts = {}; state.diagramFiles = {}; }
+      return;
+    }
+    if (existing) return;
     if (!findEditor()) return;
     buildPanel();
   }
@@ -468,6 +489,71 @@
     if (state.step === "diagrams") return renderDiagramsStep(area);
     if (state.step === "ai") return renderAiStep(area);
     if (state.step === "ext") return renderExtStep(area);
+    if (state.step === "assembling") return renderAssemblingStep(area);
+    if (state.step === "done") return renderDoneStep(area);
+  }
+
+  function renderAssemblingStep(area) {
+    // A big prominent busy state so it's obvious work is in progress — no chance the user
+    // thinks "did I click something?" during a 60-second image loop.
+    ensureSpinnerStyles();
+    const h = document.createElement("div");
+    h.style.cssText = S.stepHead;
+    h.textContent = "Assembling into your Medium draft…";
+    area.appendChild(h);
+    const bar = document.createElement("div");
+    bar.setAttribute("data-af-progress", "1");
+    bar.style.cssText = "display:flex;align-items:center;gap:10px;margin:6px 0 8px";
+    bar.innerHTML =
+      '<div style="width:16px;height:16px;border:2px solid #cdbf93;border-top-color:#f5c518;border-radius:50%;animation:af-spin 0.8s linear infinite;flex:0 0 16px"></div>' +
+      '<div data-af-progress-text style="font-size:12.5px;color:#3a3d46;line-height:1.4">Preparing…</div>';
+    area.appendChild(bar);
+    const help = document.createElement("div");
+    help.style.cssText = S.hint;
+    help.textContent = "Please don't touch the Medium editor until this finishes. Progress detail is in the log at the bottom.";
+    area.appendChild(help);
+  }
+
+  function renderDoneStep(area) {
+    const summary = state.doneSummary || { totalImgs: 0, altOk: 0, capOk: 0 };
+    const h = document.createElement("div");
+    h.style.cssText = S.stepHead + ";color:#1a7a4c;font-size:14px";
+    h.textContent = "✓ Article inserted";
+    area.appendChild(h);
+    const box = document.createElement("div");
+    box.style.cssText = "background:#eaf4ec;border:1px solid #b8d8bd;border-radius:8px;padding:10px 12px;margin:6px 0 8px;font-size:12.5px;color:#1a3d1e;line-height:1.5";
+    box.innerHTML =
+      `<div><b>${summary.totalImgs}</b> image${summary.totalImgs === 1 ? "" : "s"} placed</div>` +
+      `<div><b>${summary.altOk}</b>/<b>${summary.totalImgs}</b> alt tags filled</div>` +
+      `<div><b>${summary.capOk}</b>/<b>${summary.totalImgs}</b> captions filled</div>`;
+    area.appendChild(box);
+    const hint2 = document.createElement("div");
+    hint2.style.cssText = S.hint;
+    hint2.innerHTML = "Review the Medium draft, then <b>Publish</b> when ready. Any missing alt/caption can be filled by clicking each image in the editor.";
+    area.appendChild(hint2);
+    primaryButton(area, "Start a new article", () => {
+      state.step = "body";
+      state.bodyRaw = "";
+      state.blocks = [];
+      state.slots = [];
+      state.prompts = {};
+      state.diagramFiles = {};
+      state.doneSummary = null;
+      renderStep();
+    });
+  }
+
+  function ensureSpinnerStyles() {
+    if (document.getElementById("af-anim")) return;
+    const s = document.createElement("style");
+    s.id = "af-anim";
+    s.textContent = "@keyframes af-spin{to{transform:rotate(360deg)}}";
+    document.head.appendChild(s);
+  }
+
+  function setProgress(text) {
+    const el = document.querySelector('[data-af-progress-text]');
+    if (el) el.textContent = text;
   }
 
   function stepHead(area, n, title) {
@@ -767,7 +853,13 @@
 
   // ================= assemble + insert ================================================
   async function runAssemble() {
+    // Move the panel into the visible busy state before any work starts, so the user gets
+    // immediate feedback the button did something. renderStep() clears the step area, so we
+    // do that first, then the async pipeline updates the same progress line as it runs.
+    state.step = "assembling";
+    renderStep();
     try {
+      setProgress("Parsing article and preparing images…");
       log("Building article…");
       const { article, images } = buildArticleDOM();
       const payload = {
@@ -775,11 +867,16 @@
         text: article.textContent,
         images, // [{ marker, blob, alt, caption }] — pasted separately after the body
       };
-      log("Inserting into your Medium draft…");
+      log(`Article has ${images.length} image${images.length === 1 ? "" : "s"}.`);
       const summary = await insertArticle(payload);
-      log(summary || "Done.", "ok");
+      state.doneSummary = summary;
+      state.step = "done";
+      renderStep();
+      log(`Assemble complete: ${summary.totalImgs} images, ${summary.altOk} alt, ${summary.capOk} captions.`, "ok");
     } catch (err) {
       log("Assemble failed: " + (err && err.message || err), "err");
+      state.step = "ext"; // return to the last interactive step so the user can retry
+      renderStep();
     }
   }
 
@@ -841,7 +938,7 @@
 
   async function insertArticle(src) {
     const ed = findEditor();
-    if (!ed) { log("Couldn't find the Medium editor on this page.", "err"); return "editor not found"; }
+    if (!ed) { log("Couldn't find the Medium editor on this page.", "err"); return { totalImgs: 0, altOk: 0, capOk: 0 }; }
     const existingFigs = document.querySelectorAll("figure.graf--figure").length;
     const existingText = (ed.textContent || "").trim().length;
     if (existingFigs >= 3 || existingText >= 800) {
@@ -851,89 +948,111 @@
       );
       if (!proceed) {
         log("Insert cancelled — draft already has content.", "warn");
-        return "insert cancelled (draft not empty)";
+        return { totalImgs: 0, altOk: 0, capOk: 0 };
       }
     }
 
-    // 1) Paste the body (with text markers where images belong, no <img> tags at all).
+    // 1) Paste the body with text markers where images belong, no <img> tags at all.
+    setProgress("Pasting article body…");
     log("Inserting body via a synthetic paste…");
     placeCaretAtEnd(ed);
     const dt = new DataTransfer();
     dt.setData("text/html", src.bodyHTML);
     dt.setData("text/plain", src.text || "");
     ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-    // Give Medium a moment to render the pasted text.
     await sleep(900);
 
-    // 2) For each image, find its text marker in the editor and paste the raw image bytes there.
-    // Medium's IMAGE paste handler is a completely separate code path from its HTML paste path,
-    // and it's the reliable one — it's the same path fired when a user Ctrl+V's a copied image.
+    // 2) For each image (in order): paste at its marker, IDENTIFY the exact new figure by
+    // diffing the figure set before vs after, tag that figure with a rock-solid data-af-idx
+    // attribute, and immediately fill ITS alt + caption before moving to the next image.
+    //
+    // Why interleaved rather than "paste all, then fill all": if any image fails to insert,
+    // the fill-at-end approach shifts every subsequent image's alt/caption by one and silently
+    // gives the wrong metadata to every image after the failure. Doing each image's alt +
+    // caption right after its own successful insert means a failure only affects THAT image —
+    // every other image still gets ITS OWN alt and caption, mapped by identity, not by index.
     const images = src.images || [];
-    log(`Inserting ${images.length} image${images.length === 1 ? "" : "s"} in place…`);
-    let insertedFigs = 0;
-    for (const item of images) {
+    log(`Inserting ${images.length} image${images.length === 1 ? "" : "s"} + filling alt/caption per image…`);
+    let insertedCount = 0, altOk = 0, capOk = 0;
+
+    for (let i = 0; i < images.length; i++) {
+      const item = images[i];
+      setProgress(`Image ${i + 1} / ${images.length}: placing…`);
+      log(`Image ${i + 1}/${images.length}: inserting…`);
+
       const p = findMarkerParagraph(item.marker);
-      if (!p) { log(`Marker ${item.marker} not found in editor — skipping.`, "warn"); continue; }
+      if (!p) { log(`  Marker ${item.marker} not found in editor — skipping.`, "warn"); continue; }
       p.scrollIntoView({ block: "center" });
       await sleep(120);
 
-      // Select the entire marker paragraph so the pasted image replaces it, not appends after.
+      // Snapshot the current figure set — everything we see after the paste that ISN'T in
+      // this set is the new figure created for THIS image. This is the identity anchor —
+      // no ordering assumptions, no position math, and totally robust to failures.
+      const before = new Set(document.querySelectorAll("figure.graf--figure"));
+
+      // Select the marker paragraph so the pasted image replaces it (not appends alongside).
       const range = document.createRange();
       range.selectNodeContents(p);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
 
-      // Build a Files-only DataTransfer — same shape as a real image paste from the OS clipboard.
-      // We use `.items.add(File)` because just setting `.files` is read-only in some browsers.
-      const file = new File([item.blob], `af-img-${insertedFigs + 1}.jpg`, { type: item.blob.type || "image/jpeg" });
+      const file = new File([item.blob], `af-img-${i + 1}.jpg`, { type: item.blob.type || "image/jpeg" });
       const idt = new DataTransfer();
-      try { idt.items.add(file); } catch (e) { log("DataTransfer.items.add failed: " + e.message, "err"); continue; }
-
+      try { idt.items.add(file); } catch (e) { log("  DataTransfer.items.add failed: " + e.message, "err"); continue; }
       ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: idt, bubbles: true, cancelable: true }));
 
-      // Wait for a new figure to appear (Medium uploads to its own CDN async).
-      const before = document.querySelectorAll("figure.graf--figure").length;
+      // Wait for a new figure to show up in the DOM. Medium uploads to its own CDN async, so
+      // this can take a few seconds per image on a slow connection.
+      let newFig = null;
       const t0 = Date.now();
       while (Date.now() - t0 < 15000) {
-        if (document.querySelectorAll("figure.graf--figure").length > before) break;
+        const afterFigs = [...document.querySelectorAll("figure.graf--figure")];
+        newFig = afterFigs.find((f) => !before.has(f));
+        if (newFig) break;
         await sleep(200);
       }
-      const now = document.querySelectorAll("figure.graf--figure").length;
-      if (now > before) {
-        insertedFigs = now;
-        // If Medium kept the marker paragraph around, remove it — the image replaced the selection
-        // in some builds and inserted a new node in others; either way the marker text is stale.
-        const leftover = findMarkerParagraph(item.marker);
-        if (leftover) leftover.remove();
-      } else {
-        log(`Image at ${item.marker} didn't upload — Medium may have rejected the paste.`, "warn");
+      if (!newFig) {
+        log(`  Image ${i + 1} didn't upload — Medium may have rejected the paste.`, "warn");
+        continue;
+      }
+      // Solid identifier: tag THIS exact figure so no later code path (or any other extension)
+      // can mistake it for a neighbour. Alt and caption we fill next both target this element
+      // by reference — not by index — so failures elsewhere don't affect this image's metadata.
+      newFig.setAttribute("data-af-idx", String(i));
+      newFig.setAttribute("data-af-marker", item.marker);
+      insertedCount++;
+
+      // Remove any residual marker paragraph (Medium's paste handler in some builds inserts a
+      // new figure alongside the selection instead of replacing it).
+      const leftover = findMarkerParagraph(item.marker);
+      if (leftover && leftover !== newFig) leftover.remove();
+
+      // Fill THIS figure's alt.
+      if (item.alt) {
+        setProgress(`Image ${i + 1} / ${images.length}: setting alt…`);
+        log(`  Setting alt…`);
+        if (await setAlt(newFig, item.alt)) altOk++;
+        await sleep(150);
+      }
+
+      // Fill THIS figure's caption.
+      if (item.caption) {
+        setProgress(`Image ${i + 1} / ${images.length}: setting caption…`);
+        log(`  Setting caption…`);
+        if (await setCaption(newFig, item.caption)) capOk++;
+        await sleep(120);
       }
     }
 
-    const finalCount = document.querySelectorAll("figure.graf--figure").length;
-    log(`Inserted ${finalCount} image${finalCount === 1 ? "" : "s"}. Now filling alt & captions.`);
-
-    // 3) Fill alt + captions on the resulting figures, in the order we inserted them. Because
-    // Medium's editor appended each new figure at the marker position IN ORDER, `figs[k]`
-    // corresponds to `images[k]`. If any images failed to insert, the mapping stays intact
-    // for the ones that did — filling stops at the shorter of the two arrays.
-    const filledFigs = [...document.querySelectorAll("figure.graf--figure")];
-    const alts = images.map((im) => im.alt);
-    const captions = images.map((im) => im.caption);
-    const n = Math.min(filledFigs.length, alts.length);
-    let okAlt = 0, okCap = 0;
-    for (let i = 0; i < n; i++) {
-      if (alts[i]) { log(`Image ${i + 1}/${n}: setting alt…`); if (await setAlt(filledFigs[i], alts[i])) okAlt++; await sleep(200); }
-      if (captions[i]) { log(`Image ${i + 1}/${n}: setting caption…`); if (await setCaption(filledFigs[i], captions[i])) okCap++; await sleep(120); }
-    }
-    log(`Alt: ${okAlt}/${n} filled. Captions: ${okCap}/${n} filled.`, "ok");
-    return `body + ${finalCount} images inserted; alt ${okAlt}/${n}, captions ${okCap}/${n}.`;
+    log(`Done. Placed ${insertedCount}/${images.length} images. Alt: ${altOk}. Captions: ${capOk}.`, "ok");
+    // Return a structured summary so renderDoneStep can display it.
+    return { totalImgs: insertedCount, altOk, capOk };
   }
 
   // Find the paragraph in Medium's editor whose text contains our marker. We check <p> first
   // (Medium's most common paragraph shape) and fall back to any element in the editor. The
-  // marker text is unique enough that a substring match is safe.
+  // marker text is distinctive enough ([[AF-IMG-N]]) that a substring match is safe.
   function findMarkerParagraph(marker) {
     const ed = findEditor();
     if (!ed) return null;
@@ -1085,4 +1204,11 @@
   ensurePanel();
   const mo = new MutationObserver(() => ensurePanel());
   mo.observe(document.documentElement, { childList: true, subtree: true });
+  // Medium is a SPA — URL changes without a real navigation. MutationObserver won't fire on
+  // history.pushState alone, so poll the URL every ~600ms. Cheap, and it's the reliable way
+  // to notice when the user closed a comment overlay or switched to a different Medium page.
+  let lastHref = location.href;
+  setInterval(() => {
+    if (location.href !== lastHref) { lastHref = location.href; ensurePanel(); }
+  }, 600);
 })();

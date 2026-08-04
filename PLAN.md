@@ -349,6 +349,147 @@ pointing at the Vercel requirement (no serverless runtime on Pages).
   first, since rewriting published history is a destructive, hard-to-reverse
   operation.
 
+## 4.5. Extension iteration log (2026-08-03)
+
+The whole "Chrome extension for Medium" flow was iterated aggressively on
+2026-08-03 based on user testing screenshots + logs from a live Medium
+draft. This section captures the state at end of that day — what changed,
+why, and what's still open.
+
+### Final architecture (v0.4.0, end of 2026-08-03)
+
+- **Small floating panel** on any Medium draft-edit URL, bottom-right,
+  ~400px wide. Panel IS the wizard now — the whole step-by-step assembly
+  (Body copy → Diagram folder → AI images → External images → Assemble)
+  runs directly inside it. No iframe overlay, no separate wizard tab hop
+  (the standalone `wizard.html` tab still exists, opened from the toolbar
+  action, for anyone who wants the big-screen version — its code path
+  survived the panel refactor untouched).
+- **Wizard core (parser + slot rendering + image handling) is duplicated**
+  into `content.js` from `wizard.js` (~250 lines). Both stay in sync by
+  hand; the duplication is the price for having a native step-by-step UI
+  inside the compact panel without an iframe.
+- **The panel walks through steps one at a time**, not all-stacked-and-
+  scroll like the standalone wizard does. Clicking Next replaces the
+  visible fields with the next step's fields, in place.
+- **Assembly → Medium editor path** uses two Medium-paste tricks in
+  sequence: the body pastes via HTML paste (which preserves code/ASCII/
+  headings/captions text), then each image pastes SEPARATELY via image-
+  paste (a real ClipboardEvent carrying just a File blob, at the image's
+  text-marker position). This second path is the same Medium code path
+  that fires when a user Ctrl+V's a copied image, and it is proven to
+  reliably ingest raw bytes and host them on Medium's own CDN — the key
+  breakthrough that let this app stop hosting images itself.
+
+### Strict URL-based panel guard (2026-08-03 fix)
+
+**Bug:** the panel was mounting on ANY medium.com URL where an
+`[contenteditable="true"]` element existed — which incorrectly included
+response/comment overlays on someone else's article. User reported seeing
+the panel over a stranger's post's response state.
+
+**Fix:** `isDraftEditPage()` matches only the three URL shapes Medium
+uses for author-facing drafts:
+- `https://medium.com/p/<id>/edit`
+- `https://medium.com/new-story`
+- `https://medium.com/@<user>/<slug>/edit`
+
+`ensurePanel()` now tears the panel down and resets wizard state when
+we're not on a draft edit page. Since Medium is a SPA, we ALSO poll
+`location.href` every 600ms to react to `pushState`/`replaceState`-only
+navigations that don't trigger the existing `MutationObserver`.
+
+### Panel UX: proper busy + done states (2026-08-03)
+
+The panel now has explicit `assembling` and `done` step-states in
+addition to the four data-entry ones. On Assemble:
+
+1. Panel immediately swaps to the **Assembling** state — a spinner, a
+   progress line updated by `setProgress()` (e.g. `Image 7 / 23:
+   setting alt…`), and a "please don't touch the editor" hint. The
+   existing log at the bottom still streams every action.
+2. When the pipeline completes, the panel swaps to the **Done** state —
+   green ✓ header, a green summary card with three counts (**N**
+   images placed / **N/N** alt filled / **N/N** captions filled), and a
+   "Start a new article" primary button that resets all wizard state.
+3. If any exception is thrown, the panel returns to the External step
+   (last interactive step) with the error line in the log — so the user
+   can retry without losing image slots or diagram matches.
+
+### Solid per-image identity (2026-08-03)
+
+**Threat model the user articulated:** "have a system to not mess up one
+image's caption with another's, or one's alt tag with another's for any
+reason. have a solid identifier."
+
+**Old behaviour:** paste all images sequentially → then fill alt on
+`figs[k]` and caption on `figs[k]` by index. If any single image failed
+to insert (Medium paste rejection, timeout, network hiccup), every
+subsequent image's alt+caption silently shifted by one position and was
+attached to the wrong image.
+
+**New behaviour (interleaved, identity-anchored):**
+
+For each image in order:
+1. Snapshot `before = new Set(figure.graf--figure elements)` — the set
+   of figures currently in the editor.
+2. Select the image's `[[AF-IMG-N]]` marker paragraph, dispatch the
+   image ClipboardEvent.
+3. Wait (up to 15s) for a NEW figure to appear that ISN'T in `before`.
+   That specific `newFig` is THIS image's figure by identity, not by
+   position or index.
+4. Tag `newFig` with `data-af-idx="<i>"` and `data-af-marker="[[AF-IMG-
+   N]]"` — a solid identifier the DOM keeps until publish, useful for
+   diagnostics and forbids any later code from confusing figures.
+5. Immediately call `setAlt(newFig, item.alt)` and
+   `setCaption(newFig, item.caption)` on THIS figure — never by index,
+   always by reference.
+6. If the image failed to paste (step 3 timed out), skip its alt+caption
+   entirely. The next image's own alt+caption is unaffected because we
+   never touch a fig-array by index.
+
+Alt and caption values themselves stay tied to their slot in
+`buildArticleDOM` (the `images[]` array built during compile) — each
+entry carries its own `.alt`, `.caption`, `.marker`, and `.blob`, so a
+single mis-fill in the middle can't cascade.
+
+The image-paste success summary that `runAssemble` returns is now a
+structured object `{ totalImgs, altOk, capOk }` (not a string), so the
+Done view can render exact numbers instead of parsing a message.
+
+### Parser upgrades made same day
+
+Also on 2026-08-03, three parser bugs were fixed while iterating:
+
+- **stripPreamble is now a no-op.** Previous behaviour trimmed
+  everything above a "the body" / "the article" line; user asked to
+  keep the whole pasted body (SEO suite included) — they'll delete
+  anything they don't want inside Medium. Bottom trim (`IMAGE PROMPTS`
+  appendix) still happens via the `skipSection` flag.
+- **Block-shape detection in `flushPara`** (was
+  `paraBuf.join(" ")` → one paragraph regardless of content). Now:
+  - all lines match `N. text` → ordered `<ol><li>` list (fixes the "20
+    Curiosity Titles collapsed into one giant paragraph" symptom)
+  - a heading-shaped line (short, no ending punct, capital/digit start,
+    no internal commas, not a numbered item) → `<h2>` if all-caps else
+    `<h3>`. Promotes plain-text section headers like `THE SEO SUITE`,
+    `20 Curiosity Titles`, `Start With the Shower`, `The Freeze Move`
+    that the user's articles write without markdown `#`.
+  - anything else → paragraph (join with space, previous behaviour).
+- **Image hosting is dropped.** User rejected any external hosting on
+  cost + complexity grounds. Two intermediate attempts were tried and
+  discarded:
+  1. Convert data:-URI images to `blob:` URLs and put those in the
+     pasted HTML — Medium's paste handler apparently ignores blob:
+     sources (or the Chrome extension isolated world makes
+     content-script blobs invisible to Medium's page-context fetches).
+     Result in live test: text pasted, 0 images.
+  2. Paste each image as a real File via a synthetic ClipboardEvent at
+     its text marker position — Medium's IMAGE paste handler is
+     separate from its HTML paste handler and DOES ingest real File
+     blobs, uploading them to Medium's own CDN. This is what shipped
+     and is the current path.
+
 ## 5. Bugs found and fixed (2026-08-02)
 
 The user reported a real parsing failure: pasting a live article produced
