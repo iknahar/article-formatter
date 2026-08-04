@@ -960,20 +960,18 @@
     dt.setData("text/html", src.bodyHTML);
     dt.setData("text/plain", src.text || "");
     ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-    await sleep(900);
+    await sleep(1200);
 
-    // 2) For each image (in order): paste at its marker, IDENTIFY the exact new figure by
-    // diffing the figure set before vs after, tag that figure with a rock-solid data-af-idx
-    // attribute, and immediately fill ITS alt + caption before moving to the next image.
-    //
-    // Why interleaved rather than "paste all, then fill all": if any image fails to insert,
-    // the fill-at-end approach shifts every subsequent image's alt/caption by one and silently
-    // gives the wrong metadata to every image after the failure. Doing each image's alt +
-    // caption right after its own successful insert means a failure only affects THAT image —
-    // every other image still gets ITS OWN alt and caption, mapped by identity, not by index.
+    // 2) Insert images IN ORDER. For each: identify the new figure by set-diff (rock-solid
+    // reference, not position/index), keep a JS handle to it. NO data-* attributes added,
+    // NO placeholder markup removed by hand — everything goes through events Medium's editor
+    // itself listens to. The previous version got a "Trouble with saving stories" error from
+    // Medium's autosave because it was doing DOM removal (leftover.remove()) and attribute
+    // pollution — Medium's model didn't have those elements/attrs, so its next autosave
+    // detected the mismatch and rejected the save, dropping every change we'd made.
     const images = src.images || [];
-    log(`Inserting ${images.length} image${images.length === 1 ? "" : "s"} + filling alt/caption per image…`);
-    let insertedCount = 0, altOk = 0, capOk = 0;
+    log(`Inserting ${images.length} image${images.length === 1 ? "" : "s"}…`);
+    const inserted = []; // { fig, alt, caption, idx } — refs we'll fill alt+caption on in phase 3
 
     for (let i = 0; i < images.length; i++) {
       const item = images[i];
@@ -981,29 +979,33 @@
       log(`Image ${i + 1}/${images.length}: inserting…`);
 
       const p = findMarkerParagraph(item.marker);
-      if (!p) { log(`  Marker ${item.marker} not found in editor — skipping.`, "warn"); continue; }
+      if (!p) { log(`  Marker ${item.marker} not found — skipping.`, "warn"); continue; }
       p.scrollIntoView({ block: "center" });
-      await sleep(120);
+      await sleep(150);
 
-      // Snapshot the current figure set — everything we see after the paste that ISN'T in
-      // this set is the new figure created for THIS image. This is the identity anchor —
-      // no ordering assumptions, no position math, and totally robust to failures.
+      // Identity anchor — snapshot BEFORE the paste so we can diff and find the exact
+      // figure this image produced, no matter where Medium chooses to place it in the DOM.
       const before = new Set(document.querySelectorAll("figure.graf--figure"));
 
-      // Select the marker paragraph so the pasted image replaces it (not appends alongside).
+      // Select the marker paragraph, then have the BROWSER delete it via execCommand
+      // (which Medium's editor handles correctly, because it's the same code path as a
+      // real user pressing Backspace with a selection). Then paste the image at the
+      // now-empty position. This replaces "select+dispatch paste" (which sometimes left
+      // the marker text behind, forcing us to leftover.remove() and provoke Medium's model
+      // mismatch) with a clean "select+delete via browser API, then paste" pair.
       const range = document.createRange();
       range.selectNodeContents(p);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
+      document.execCommand("delete", false, null);
+      await sleep(100);
 
       const file = new File([item.blob], `af-img-${i + 1}.jpg`, { type: item.blob.type || "image/jpeg" });
       const idt = new DataTransfer();
       try { idt.items.add(file); } catch (e) { log("  DataTransfer.items.add failed: " + e.message, "err"); continue; }
       ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: idt, bubbles: true, cancelable: true }));
 
-      // Wait for a new figure to show up in the DOM. Medium uploads to its own CDN async, so
-      // this can take a few seconds per image on a slow connection.
       let newFig = null;
       const t0 = Date.now();
       while (Date.now() - t0 < 15000) {
@@ -1012,42 +1014,45 @@
         if (newFig) break;
         await sleep(200);
       }
-      if (!newFig) {
-        log(`  Image ${i + 1} didn't upload — Medium may have rejected the paste.`, "warn");
-        continue;
-      }
-      // Solid identifier: tag THIS exact figure so no later code path (or any other extension)
-      // can mistake it for a neighbour. Alt and caption we fill next both target this element
-      // by reference — not by index — so failures elsewhere don't affect this image's metadata.
-      newFig.setAttribute("data-af-idx", String(i));
-      newFig.setAttribute("data-af-marker", item.marker);
-      insertedCount++;
-
-      // Remove any residual marker paragraph (Medium's paste handler in some builds inserts a
-      // new figure alongside the selection instead of replacing it).
-      const leftover = findMarkerParagraph(item.marker);
-      if (leftover && leftover !== newFig) leftover.remove();
-
-      // Fill THIS figure's alt.
-      if (item.alt) {
-        setProgress(`Image ${i + 1} / ${images.length}: setting alt…`);
-        log(`  Setting alt…`);
-        if (await setAlt(newFig, item.alt)) altOk++;
-        await sleep(150);
-      }
-
-      // Fill THIS figure's caption.
-      if (item.caption) {
-        setProgress(`Image ${i + 1} / ${images.length}: setting caption…`);
-        log(`  Setting caption…`);
-        if (await setCaption(newFig, item.caption)) capOk++;
-        await sleep(120);
-      }
+      if (!newFig) { log(`  Image ${i + 1} didn't insert — Medium rejected the paste.`, "warn"); continue; }
+      inserted.push({ fig: newFig, alt: item.alt, caption: item.caption, idx: i });
     }
 
-    log(`Done. Placed ${insertedCount}/${images.length} images. Alt: ${altOk}. Captions: ${capOk}.`, "ok");
-    // Return a structured summary so renderDoneStep can display it.
-    return { totalImgs: insertedCount, altOk, capOk };
+    // 3) Let Medium settle. After a burst of image inserts, its editor is doing async work
+    // (Medium's CDN upload, model reconciliation). Giving it a beat here means alt-dialog
+    // clicks and caption edits fire against a stable editor state — not one mid-transition
+    // that rejects our clicks or silently reverts.
+    setProgress("Letting Medium settle…");
+    log(`Placed ${inserted.length}/${images.length} images. Letting Medium settle before alt/caption…`);
+    await sleep(2500);
+
+    // 4) Fill alt for every inserted figure (via Medium's own alt dialog — click image, click
+    // "Alt text", type in the contenteditable, click Save. That's Medium's own UI, so its
+    // model records the change through its own event handlers, no risk of save-mismatch).
+    let altOk = 0;
+    for (let k = 0; k < inserted.length; k++) {
+      const item = inserted[k];
+      if (!item.alt) continue;
+      setProgress(`Alt ${k + 1} / ${inserted.length}…`);
+      log(`Image ${item.idx + 1}: setting alt…`);
+      if (await setAlt(item.fig, item.alt)) altOk++;
+      await sleep(200);
+    }
+
+    // 5) Fill captions. See setCaption comments for the strict "events only, no DOM writes"
+    // approach — that's the difference from the previous version.
+    let capOk = 0;
+    for (let k = 0; k < inserted.length; k++) {
+      const item = inserted[k];
+      if (!item.caption) continue;
+      setProgress(`Caption ${k + 1} / ${inserted.length}…`);
+      log(`Image ${item.idx + 1}: setting caption…`);
+      if (await setCaption(item.fig, item.caption)) capOk++;
+      await sleep(150);
+    }
+
+    log(`Done. Placed ${inserted.length}/${images.length} images. Alt: ${altOk}. Captions: ${capOk}.`, "ok");
+    return { totalImgs: inserted.length, altOk, capOk };
   }
 
   // Find the paragraph in Medium's editor whose text contains our marker. We check <p> first
@@ -1122,65 +1127,52 @@
     fc.scrollIntoView({ block: "center" });
     await sleep(80);
     const target = (captionText || "").trim();
-    const stuck = () => fc.textContent.trim() === target && !figure.classList.contains("is-defaultValue");
-    const clearPlaceholder = () => {
-      fc.querySelectorAll(".defaultValue").forEach((n) => n.remove());
-      fc.querySelectorAll("br").forEach((br) => br.remove());
-      figure.classList.remove("is-defaultValue");
-    };
-    const selectAllIn = () => {
-      const range = document.createRange();
-      range.selectNodeContents(fc);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    };
-    const fireInput = () => {
-      try { fc.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: false, data: target, inputType: "insertText" })); } catch {}
-    };
+    // Strict "events only" approach — never modify Medium-managed DOM (removing the
+    // .defaultValue placeholder span, removing the is-defaultValue class, replacing
+    // fc's children) triggers Medium's autosave failure ("Trouble with saving stories"),
+    // which rolls back EVERY change we've made across the whole assemble run.
 
-    // Attempt A: click the image first (activates the caption slot), then click into figcaption
-    // and insertText. That real-mouse-click on the image is what puts Medium's figure into
-    // "selected" state, which is what makes the caption slot writable in the first place.
+    // Click the image first — Medium doesn't activate the caption slot until the figure
+    // is in its "selected" state.
     const img = figure.querySelector("img.graf-image") || figure.querySelector("img");
     if (img) {
       fireMouse(img, "mousedown"); fireMouse(img, "mouseup"); fireMouse(img, "click");
       await waitFor(() => figure.classList.contains("is-selected"), 1500, 60);
-      await sleep(80);
+      await sleep(150);
     }
-    fireMouse(fc, "mousedown"); fireMouse(fc, "mouseup"); fireMouse(fc, "click");
-    await sleep(60);
-    fc.focus();
-    await sleep(40);
-    clearPlaceholder();
-    selectAllIn();
-    document.execCommand("insertText", false, target);
-    fireInput();
-    await sleep(120);
-    if (stuck()) return true;
 
-    // Attempt B: synthetic paste event scoped to the figcaption.
-    fc.focus(); await sleep(30);
-    clearPlaceholder();
-    selectAllIn();
+    // Focus the figcaption via a click, same as a real user would.
+    fireMouse(fc, "mousedown"); fireMouse(fc, "mouseup"); fireMouse(fc, "click");
+    await sleep(100);
+    fc.focus();
+    await sleep(50);
+
+    // Select all figcaption contents so the paste REPLACES (rather than appending after)
+    // the placeholder Medium put there. Range API is read-only on the DOM — it selects,
+    // it doesn't modify — so this doesn't upset Medium's model.
+    const range = document.createRange();
+    range.selectNodeContents(fc);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    await sleep(40);
+
+    // The one write we do — a ClipboardEvent("paste") with the caption text. Medium's
+    // paste handler on a focused figcaption inserts the text through its own event
+    // pipeline and reconciles its own model, so autosave doesn't detect a mismatch.
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", target);
       fc.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
-    } catch {}
-    await sleep(150);
-    if (stuck()) return true;
+    } catch (e) {
+      log(`  Caption paste dispatch failed: ${e.message}`, "warn");
+      return false;
+    }
 
-    // Attempt C: direct DOM assignment + input event.
-    while (fc.firstChild) fc.removeChild(fc.firstChild);
-    fc.appendChild(document.createTextNode(target));
-    figure.classList.remove("is-defaultValue");
-    fireInput();
-    await sleep(200);
-    if (stuck()) return true;
-
-    log(`  Caption didn't stick. figcaption.textContent = "${fc.textContent.slice(0, 40)}", is-defaultValue=${figure.classList.contains("is-defaultValue")}`, "warn");
-    return false;
+    // Verify by reading textContent (safe — a read, not a write). Medium's editor updates
+    // the DOM after the paste synchronously in Chrome; a small sleep covers slower envs.
+    await sleep(250);
+    return fc.textContent.trim().includes(target);
   }
 
   async function fillCaptions(captions) {
